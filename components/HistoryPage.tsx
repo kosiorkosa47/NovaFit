@@ -1,0 +1,134 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Clock, MessageCircle, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+
+const STORAGE_KEY = "nova-health-history";
+
+export interface HistoryEntry {
+  sessionId: string;
+  timestamp: string;
+  firstMessage: string;
+  messageCount: number;
+  topics: string[];
+}
+
+export function getHistory(): HistoryEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveHistoryEntry(entry: HistoryEntry) {
+  const existing = getHistory();
+  // Update existing or push new
+  const idx = existing.findIndex((e) => e.sessionId === entry.sessionId);
+  if (idx >= 0) {
+    existing[idx] = entry;
+  } else {
+    existing.unshift(entry);
+  }
+  // Keep last 50
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(existing.slice(0, 50)));
+}
+
+export function clearHistory() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+// ---------------------------------------------------------------------------
+
+interface HistoryPageProps {
+  onOpenSession: (sessionId?: string) => void;
+}
+
+export function HistoryPage({ onOpenSession }: HistoryPageProps) {
+  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+
+  useEffect(() => {
+    // Client-only read from localStorage on mount
+    setEntries(getHistory()); // eslint-disable-line react-hooks/set-state-in-effect
+  }, []);
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+          <Clock className="h-7 w-7 text-muted-foreground" />
+        </div>
+        <p className="text-center text-sm text-muted-foreground">
+          No conversations yet. Start chatting to see your history here.
+        </p>
+        <button
+          type="button"
+          onClick={() => onOpenSession()}
+          className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+        >
+          Start a conversation
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+      <div className="stagger-children mx-auto max-w-lg space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+            Conversation History
+          </h2>
+          <button
+            type="button"
+            onClick={() => {
+              clearHistory();
+              setEntries([]);
+            }}
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="h-3 w-3" />
+            Clear
+          </button>
+        </div>
+
+        {entries.map((entry) => {
+          const date = new Date(entry.timestamp);
+          return (
+            <button
+              key={entry.sessionId + entry.timestamp}
+              type="button"
+              onClick={() => onOpenSession(entry.sessionId)}
+              className="glass-panel tap-feedback flex w-full flex-col gap-1.5 rounded-2xl px-4 py-3.5 text-left transition-all duration-300 hover:shadow-zen"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">
+                  {date.toLocaleDateString("en-US")} {date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <MessageCircle className="h-3 w-3" />
+                  {entry.messageCount}
+                </span>
+              </div>
+              <p className="line-clamp-2 text-xs text-foreground/80">
+                {entry.firstMessage}
+              </p>
+              {entry.topics.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {entry.topics.map((t) => (
+                    <Badge key={t} variant="secondary" className="text-[9px] px-1.5 py-0">
+                      {t}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
