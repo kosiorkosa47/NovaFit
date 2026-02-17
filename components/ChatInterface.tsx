@@ -1,15 +1,17 @@
 "use client";
 
-import { Mic, SendHorizontal } from "lucide-react";
+import { Camera, Mic, SendHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { MessageBubble } from "@/components/MessageBubble";
+import { NutritionScanCard } from "@/components/NutritionScanCard";
 import { VoiceButton } from "@/components/VoiceButton";
 import { DEFAULT_GREETING } from "@/lib/constants";
 import type { AgentApiResponse, AgentApiRequest, SseEvent, PlanRecommendation } from "@/lib/types";
 import type { WearableSnapshot } from "@/lib/types";
+import type { ScanResponse } from "@/app/api/scan/route";
 import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
 
 /** uid() requires HTTPS — fallback for HTTP dev on phone */
@@ -29,6 +31,8 @@ interface UiMessage {
   plan?: PlanRecommendation;
   wearable?: WearableSnapshot;
   analyzerSummary?: string;
+  scanResult?: ScanResponse;
+  imagePreview?: string;
 }
 
 const SESSION_STORAGE_KEY = "nova-health-session-id";
@@ -140,6 +144,7 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Initialize session
   useEffect(() => {
@@ -301,6 +306,53 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
       setHasStarted(true);
     }
 
+    // Check if user wants to scan ingredients (text-based)
+    const isScanRequest =
+      sanitizedMessage.toLowerCase().startsWith("scan:") ||
+      sanitizedMessage.toLowerCase().startsWith("ingredients:") ||
+      (sanitizedMessage.length > 50 && /(?:ingredients|sodium|sugar|calories|nutrition|e\d{3})/i.test(sanitizedMessage));
+
+    if (isScanRequest) {
+      addUserMessage(sanitizedMessage);
+      setInput("");
+      setStatusLabel("Analyzing ingredients...");
+      setIsStreaming(true);
+      textareaRef.current?.blur();
+
+      try {
+        const ingredientsText = sanitizedMessage.replace(/^(?:scan|ingredients):\s*/i, "");
+        const response = await fetch("/api/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ingredientsText }),
+        });
+        const result = (await response.json()) as ScanResponse;
+        if (result.success) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uid(),
+              role: "assistant",
+              content: result.summary,
+              timestamp: new Date().toISOString(),
+              agentLabel: "Scanner",
+              scanResult: result,
+            }
+          ]);
+          speakText(result.summary);
+          startInactivityTimer();
+        } else {
+          addAssistantMessage("Could not analyze those ingredients. Try again.", "Scanner");
+        }
+      } catch {
+        addAssistantMessage("Failed to analyze ingredients.", "Scanner");
+      } finally {
+        setStatusLabel(null);
+        setIsStreaming(false);
+      }
+      return;
+    }
+
     addUserMessage(sanitizedMessage);
     setInput("");
     setStatusLabel("Nova is analyzing your request...");
@@ -348,6 +400,92 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
       setIsStreaming(false);
     }
   }, [addAssistantMessage, addUserMessage, handleStreamResponse, hasStarted, input, isStreaming, sessionId]);
+
+  const handleScanUpload = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file.");
+      return;
+    }
+
+    if (!hasStarted) {
+      setMessages([{
+        id: uid(),
+        role: "assistant",
+        content: DEFAULT_GREETING,
+        timestamp: new Date().toISOString(),
+        agentLabel: "Nova"
+      }]);
+      setHasStarted(true);
+    }
+
+    // Show preview as user message
+    const previewUrl = URL.createObjectURL(file);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        role: "user",
+        content: "Scan this product label",
+        timestamp: new Date().toISOString(),
+        imagePreview: previewUrl,
+      }
+    ]);
+
+    setStatusLabel("Scanning nutrition label...");
+    setIsStreaming(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const response = await fetch("/api/scan", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = (await response.json()) as ScanResponse & { error?: string };
+
+      if (!response.ok || !result.success) {
+        // If OCR failed, prompt manual input
+        addAssistantMessage(
+          "I couldn't read the label from the photo. Please type or paste the ingredients list and I'll analyze it for harmful additives.",
+          "Scanner"
+        );
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: "assistant",
+            content: result.summary,
+            timestamp: new Date().toISOString(),
+            agentLabel: "Scanner",
+            scanResult: result,
+          }
+        ]);
+        speakText(result.summary);
+        startInactivityTimer();
+      }
+    } catch {
+      toast.error("Failed to scan the product.");
+      addAssistantMessage(
+        "Something went wrong during scanning. Try typing the ingredients list instead.",
+        "Scanner"
+      );
+    } finally {
+      setStatusLabel(null);
+      setIsStreaming(false);
+    }
+  }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer]);
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) void handleScanUpload(file);
+      e.target.value = "";
+    },
+    [handleScanUpload]
+  );
 
   const handleVoiceTranscript = useCallback((text: string) => {
     setInput(text);
@@ -411,16 +549,29 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
       >
         <div className="mx-auto max-w-2xl space-y-2.5">
           {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              role={message.role}
-              content={message.content}
-              timestamp={message.timestamp}
-              agentLabel={message.agentLabel}
-              plan={message.plan}
-              wearable={message.wearable}
-              analyzerSummary={message.analyzerSummary}
-            />
+            <div key={message.id}>
+              {message.imagePreview && (
+                <div className="mb-1 flex justify-end">
+                  <img
+                    src={message.imagePreview}
+                    alt="Scanned product"
+                    className="max-h-48 rounded-2xl border border-white/30 object-cover shadow-sm"
+                  />
+                </div>
+              )}
+              <MessageBubble
+                role={message.role}
+                content={message.content}
+                timestamp={message.timestamp}
+                agentLabel={message.agentLabel}
+                plan={message.plan}
+                wearable={message.wearable}
+                analyzerSummary={message.analyzerSummary}
+              />
+              {message.scanResult && (
+                <NutritionScanCard data={message.scanResult} />
+              )}
+            </div>
           ))}
 
           {statusLabel && <StatusStep message={statusLabel} />}
@@ -443,6 +594,24 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
       <div className="shrink-0 border-t-[1.5px] border-white/50 bg-gradient-to-b from-white/65 to-white/45 px-3 pb-2 pt-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.7),0_-8px_32px_-4px_rgba(16,185,129,0.06)] backdrop-blur-[50px] backdrop-saturate-[250%] backdrop-brightness-[1.15] dark:border-emerald-800/20 dark:from-[rgba(16,185,129,0.10)] dark:to-[rgba(2,44,34,0.50)] dark:shadow-[inset_0_2px_0_rgba(255,255,255,0.08),0_-8px_32px_-4px_rgba(0,0,0,0.3)]">
         <div className="mx-auto flex max-w-2xl items-end gap-1.5">
           <VoiceButton onTranscript={handleVoiceTranscript} disabled={isStreaming} />
+
+          <button
+            type="button"
+            disabled={isStreaming}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-2xl border-[1.5px] border-white/40 bg-white/35 text-muted-foreground transition-all hover:text-foreground active:scale-95 disabled:opacity-40 dark:border-emerald-800/20 dark:bg-emerald-950/20"
+            title="Scan nutrition label"
+          >
+            <Camera className="h-4.5 w-4.5" />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
 
           <textarea
             suppressHydrationWarning
