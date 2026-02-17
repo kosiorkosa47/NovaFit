@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { createHmac } from "crypto";
 
 import { orchestrateAgents } from "@/lib/orchestrator";
 import { sanitizeMessageInput } from "@/lib/utils/sanitize";
 import { log } from "@/lib/utils/logging";
+import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -57,10 +59,42 @@ async function sendTypingAction(chatId: number): Promise<void> {
  *
  * Required env var: TELEGRAM_BOT_TOKEN
  */
+/**
+ * Verify Telegram webhook using X-Telegram-Bot-Api-Secret-Token header.
+ * Set the secret when registering the webhook:
+ *   curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=...&secret_token=<SECRET>"
+ */
+function verifyTelegramWebhook(request: Request): boolean {
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secret) return true; // Skip verification if no secret configured
+
+  const headerToken = request.headers.get("x-telegram-bot-api-secret-token");
+  if (!headerToken) return false;
+
+  // Constant-time comparison
+  const expected = Buffer.from(secret);
+  const received = Buffer.from(headerToken);
+  if (expected.length !== received.length) return false;
+  return createHmac("sha256", expected).digest().equals(createHmac("sha256", received).digest());
+}
+
 export async function POST(request: Request): Promise<Response> {
   const token = getTelegramToken();
   if (!token) {
     return NextResponse.json({ error: "Telegram bot not configured" }, { status: 503 });
+  }
+
+  // Verify webhook authenticity
+  if (!verifyTelegramWebhook(request)) {
+    log({ level: "warn", agent: "telegram", message: "Rejected request: invalid webhook secret" });
+    return NextResponse.json({ ok: false }, { status: 403 });
+  }
+
+  // Rate limit: 60 requests per minute (Telegram sends bursts)
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "telegram";
+  const rl = checkRateLimit(ip, 60, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: true }, { status: 200 }); // Always 200 for Telegram
   }
 
   try {

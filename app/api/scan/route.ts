@@ -7,6 +7,10 @@ import {
   type NutritionFacts,
 } from "@/lib/integrations/ingredients-db";
 import { log } from "@/lib/utils/logging";
+import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_TEXT_LENGTH = 5000;
 
 export const runtime = "nodejs";
 
@@ -111,6 +115,16 @@ function generateSummary(
  */
 export async function POST(request: Request): Promise<Response> {
   try {
+    // Rate limit: 30 requests per minute per IP
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const rl = checkRateLimit(ip, 30, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Too many requests. Please wait a moment." },
+        { status: 429, headers: getRateLimitHeaders(rl) }
+      );
+    }
+
     const contentType = request.headers.get("content-type") ?? "";
 
     let ingredientsText = "";
@@ -122,6 +136,12 @@ export async function POST(request: Request): Promise<Response> {
       const imageFile = formData.get("image") as File | null;
 
       if (imageFile) {
+        if (imageFile.size > MAX_IMAGE_SIZE) {
+          return NextResponse.json(
+            { success: false, error: "Image too large. Maximum size is 5 MB." },
+            { status: 413 }
+          );
+        }
         const buffer = await imageFile.arrayBuffer();
         imageBase64 = Buffer.from(buffer).toString("base64");
 
@@ -135,7 +155,7 @@ export async function POST(request: Request): Promise<Response> {
       const body = (await request.json().catch(() => null)) as {
         ingredientsText?: string;
       } | null;
-      ingredientsText = body?.ingredientsText ?? "";
+      ingredientsText = (body?.ingredientsText ?? "").slice(0, MAX_TEXT_LENGTH);
     }
 
     if (!ingredientsText.trim()) {

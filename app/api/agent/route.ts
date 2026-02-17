@@ -7,6 +7,7 @@ import type { SseEvent } from "@/lib/orchestrator/types";
 import { MAX_FEEDBACK_LENGTH, MAX_MESSAGE_LENGTH, sanitizeMessageInput, sanitizeFeedbackInput } from "@/lib/utils/sanitize";
 import { formatSseEvent } from "@/lib/utils/sse";
 import { log } from "@/lib/utils/logging";
+import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import { isValidSessionId } from "@/lib/utils/sanitize";
 
@@ -38,6 +39,16 @@ function getSafeErrorMessage(error: unknown): string {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    // Rate limit: 20 requests per minute per IP
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const rl = checkRateLimit(ip, 20, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Too many requests. Please wait a moment." },
+        { status: 429, headers: getRateLimitHeaders(rl) }
+      );
+    }
+
     const body = await request.json().catch(() => null);
     const parsed = requestSchema.safeParse(body);
 
