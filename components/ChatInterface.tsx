@@ -14,10 +14,10 @@ import type { WearableSnapshot } from "@/lib/types";
 import type { ScanResponse } from "@/app/api/scan/route";
 import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
 
-/** uid() requires HTTPS — fallback for HTTP dev on phone */
+/** Safe unique ID — fallback for HTTP (no secure context) */
 function uid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    try { return uid(); } catch { /* secure context required */ }
+    try { return crypto.randomUUID(); } catch { /* secure context required */ }
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
