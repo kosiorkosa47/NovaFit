@@ -1,4 +1,5 @@
-import { invokeNovaLite } from "@/lib/bedrock/invoke";
+import { invokeWithTools } from "@/lib/bedrock/invoke";
+import { AGENT_TOOLS, executeTool } from "@/lib/bedrock/tools";
 import type { AnalyzerResult, PlanRecommendation } from "@/lib/orchestrator/types";
 import { PLANNER_SYSTEM_PROMPT } from "@/lib/orchestrator/prompts";
 import type { ChatMessage } from "@/lib/session/session.types";
@@ -85,12 +86,14 @@ export async function runPlanner(input: PlannerInput): Promise<{ raw: string; pa
     .join("\n");
 
   try {
-    const result = await invokeNovaLite({
+    const result = await invokeWithTools({
       systemPrompt: PLANNER_SYSTEM_PROMPT,
       userPrompt,
       history: input.history,
       maxTokens: 600,
-      temperature: 0.35
+      temperature: 0.35,
+      tools: AGENT_TOOLS,
+      onToolUse: (name, toolInput) => executeTool(name, toolInput, input.sessionId),
     });
 
     const parsed = parsePlanResult(result.text, input.nutritionContext);

@@ -232,6 +232,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const cameraMenuRef = useRef<HTMLDivElement | null>(null);
+  const lastInputWasVoiceRef = useRef(false);
+  const ttsAudioRef = useRef<AudioContext | null>(null);
 
   // Initialize session + lang
   useEffect(() => {
@@ -312,17 +314,73 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     };
   }, []);
 
+  /** Play audio from base64 PCM data (Nova Sonic TTS) */
+  const playTtsAudio = useCallback((audioBase64: string, sampleRate: number) => {
+    try {
+      const audioBytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+      const samples = new Float32Array(audioBytes.length / 2);
+      const view = new DataView(audioBytes.buffer);
+      for (let i = 0; i < samples.length; i++) {
+        samples[i] = view.getInt16(i * 2, true) / 32768;
+      }
+      const ctx = new AudioContext({ sampleRate });
+      ttsAudioRef.current = ctx;
+      const buffer = ctx.createBuffer(1, samples.length, sampleRate);
+      buffer.getChannelData(0).set(samples);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start();
+    } catch (err) {
+      console.warn("[tts] Audio playback failed:", err);
+    }
+  }, []);
+
   const speakText = useCallback(
     (text: string) => {
-      if (!voiceOutput || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+      if (!voiceOutput || typeof window === "undefined") return;
+
+      // If last input was voice, use Nova Sonic TTS for premium audio
+      if (lastInputWasVoiceRef.current) {
+        lastInputWasVoiceRef.current = false;
+        // Fire-and-forget TTS request — fall back to browser speech on failure
+        void (async () => {
+          try {
+            const res = await fetch("/api/tts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: text.slice(0, 500), lang: getLang() }),
+            });
+            const data = await res.json() as { success: boolean; audioBase64?: string; sampleRate?: number };
+            if (data.success && data.audioBase64) {
+              playTtsAudio(data.audioBase64, data.sampleRate ?? 24000);
+              return;
+            }
+          } catch {
+            // Fall through to browser TTS
+          }
+          // Fallback: browser SpeechSynthesis
+          if ("speechSynthesis" in window) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.95;
+            utterance.lang = getLang() === "pl" ? "pl-PL" : "en-US";
+            window.speechSynthesis.speak(utterance);
+          }
+        })();
+        return;
+      }
+
+      // Text input — use browser speech synthesis
+      if (!("speechSynthesis" in window)) return;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 0.95;
       utterance.pitch = 1;
-      utterance.lang = "en-US";
+      utterance.lang = getLang() === "pl" ? "pl-PL" : "en-US";
       window.speechSynthesis.speak(utterance);
     },
-    [voiceOutput]
+    [voiceOutput, playTtsAudio]
   );
 
   const addUserMessage = useCallback((content: string) => {
@@ -828,8 +886,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
 
   const handleVoiceTranscript = useCallback((text: string) => {
     console.log("[chat] handleVoiceTranscript called:", text, "sessionId:", sessionId, "isStreaming:", isStreaming);
+    lastInputWasVoiceRef.current = true; // Agent response will use Nova Sonic TTS
     setInput(text);
-    // Use ref to avoid stale closure — sendMessage depends on sessionId/isStreaming
     void sendMessageRef.current(text);
   }, [sessionId, isStreaming]);
 

@@ -131,9 +131,8 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       console.log("[voice] Nova Sonic result:", JSON.stringify({ success: result.success, transcript: result.transcript?.slice(0, 80), text: result.text?.slice(0, 80), error: result.error, hasAudio: !!result.audioBase64 }));
 
       if (result.success) {
-        if (result.audioBase64) {
-          void playAudioResponse(result.audioBase64, result.sampleRate);
-        }
+        // Don't play Nova Sonic's standalone audio — the 3-agent pipeline
+        // will generate a better response, spoken via Nova Sonic TTS
         const text = result.transcript || result.text;
         if (text) emitTranscript(text);
       } else {
@@ -288,7 +287,7 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         : undefined;
       if (Ctor) {
         const recognition = new Ctor();
-        recognition.lang = "pl-PL";
+        recognition.lang = getLang() === "pl" ? "pl-PL" : "en-US";
         recognition.continuous = false;
         recognition.interimResults = false;
         recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
