@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { getBedrockClient } from "@/lib/bedrock/client";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { requireAuth } from "@/lib/auth/helpers";
@@ -83,9 +84,7 @@ export async function POST(request: Request): Promise<Response> {
       ? (imageFile.type as "image/jpeg" | "image/png" | "image/webp" | "image/gif")
       : "image/jpeg";
 
-    const client = new BedrockRuntimeClient({
-      region: process.env.AWS_REGION ?? "us-east-1",
-    });
+    const client = getBedrockClient();
 
     const command = new ConverseCommand({
       modelId: process.env.BEDROCK_MODEL_ID_LITE ?? "us.amazon.nova-2-lite-v1:0",

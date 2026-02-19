@@ -55,10 +55,8 @@ function extractTextFromConverse(output: ConverseCommandOutput): string {
   return text;
 }
 
-async function invokeWithModel(modelId: string, options: InvokeOptions): Promise<InvokeResult> {
+async function invokeWithModel(modelId: string, options: InvokeOptions, retries = 1): Promise<InvokeResult> {
   const client = getBedrockClient();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   // Build user content blocks — image first (if present), then text
   const userContent: ContentBlock[] = [];
@@ -89,21 +87,39 @@ async function invokeWithModel(modelId: string, options: InvokeOptions): Promise
     }
   };
 
-  try {
-    const response = await client.send(new ConverseCommand(input), {
-      abortSignal: controller.signal
-    });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-    return {
-      text: extractTextFromConverse(response),
-      modelId
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Bedrock error";
-    throw new Error(`Nova invocation failed (${modelId}): ${message}`);
-  } finally {
-    clearTimeout(timeout);
+    try {
+      const response = await client.send(new ConverseCommand(input), {
+        abortSignal: controller.signal
+      });
+
+      return {
+        text: extractTextFromConverse(response),
+        modelId
+      };
+    } catch (error) {
+      clearTimeout(timeout);
+      const message = error instanceof Error ? error.message : "Unknown Bedrock error";
+
+      // Retry on transient errors (throttle, timeout, network)
+      const isRetryable = message.includes("ThrottlingException") || message.includes("abort") || message.includes("ECONNRESET") || message.includes("socket hang up");
+      if (isRetryable && attempt < retries) {
+        const delay = 1000 * (attempt + 1); // 1s, 2s backoff
+        log({ level: "warn", agent: "bedrock", message: `Retrying ${modelId} in ${delay}ms (attempt ${attempt + 1}): ${message}` });
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+
+      throw new Error(`Nova invocation failed (${modelId}): ${message}`);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  throw new Error(`Nova invocation failed (${modelId}): max retries exceeded`);
 }
 
 export async function invokeNovaLite(options: InvokeOptions): Promise<InvokeResult> {
