@@ -46,7 +46,14 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark")); // eslint-disable-line react-hooks/set-state-in-effect
     setLangState(getLang()); // eslint-disable-line react-hooks/set-state-in-effect
+    const savedMock = localStorage.getItem("nova-mock-wearable");
+    if (savedMock !== null) setMockWearable(savedMock === "true"); // eslint-disable-line react-hooks/set-state-in-effect
   }, []);
+
+  const handleMockWearableChange = (checked: boolean) => {
+    setMockWearable(checked);
+    localStorage.setItem("nova-mock-wearable", String(checked));
+  };
 
   const toggleLang = () => {
     const newLang: Lang = lang === "en" ? "pl" : "en";
@@ -106,7 +113,7 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
             label={t("mock_wearable", lang)}
             description={t("mock_wearable_desc", lang)}
           >
-            <Switch checked={mockWearable} onCheckedChange={setMockWearable} />
+            <Switch checked={mockWearable} onCheckedChange={handleMockWearableChange} />
           </SettingRow>
         </div>
 
