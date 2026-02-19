@@ -500,10 +500,15 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     }
 
     // Check if user wants to scan ingredients (text-based)
+    // Only trigger scan for explicit prefixes or messages that look like pasted ingredient lists
+    // (contain multiple scan-specific terms, not just one word like "nutrition" in "nutrition plan")
+    const lowerMsg = sanitizedMessage.toLowerCase();
+    const scanKeywords = ["sodium", "sugar", "e1", "e2", "e3", "e4", "e5", "e6", "e9", "preservative", "aspartame", "msg", "hydrogenated"];
+    const scanKeywordCount = scanKeywords.filter(k => lowerMsg.includes(k)).length;
     const isScanRequest =
-      sanitizedMessage.toLowerCase().startsWith("scan:") ||
-      sanitizedMessage.toLowerCase().startsWith("ingredients:") ||
-      (sanitizedMessage.length > 50 && /(?:ingredients|sodium|sugar|calories|nutrition|e\d{3})/i.test(sanitizedMessage));
+      lowerMsg.startsWith("scan:") ||
+      lowerMsg.startsWith("ingredients:") ||
+      (sanitizedMessage.length > 80 && scanKeywordCount >= 2);
 
     if (isScanRequest) {
       addUserMessage(sanitizedMessage);
