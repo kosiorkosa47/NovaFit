@@ -1,17 +1,19 @@
 "use client";
 
-import { Camera, Mic, SendHorizontal } from "lucide-react";
+import { Camera, Mic, SendHorizontal, UtensilsCrossed, ScanBarcode } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { MessageBubble } from "@/components/MessageBubble";
 import { NutritionScanCard } from "@/components/NutritionScanCard";
+import { MealAnalysisCard } from "@/components/MealAnalysisCard";
 import { VoiceButton } from "@/components/VoiceButton";
 import { DEFAULT_GREETING } from "@/lib/constants";
 import type { AgentApiResponse, AgentApiRequest, SseEvent, PlanRecommendation } from "@/lib/types";
 import type { WearableSnapshot } from "@/lib/types";
 import type { ScanResponse } from "@/app/api/scan/route";
+import type { MealAnalysis } from "@/app/api/meal/route";
 import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
 
 /** Safe unique ID — fallback for HTTP (no secure context) */
@@ -32,6 +34,7 @@ interface UiMessage {
   wearable?: WearableSnapshot;
   analyzerSummary?: string;
   scanResult?: ScanResponse;
+  mealResult?: MealAnalysis;
   imagePreview?: string;
 }
 
@@ -140,6 +143,9 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
   const [isStreaming, setIsStreaming] = useState(false);
   const [statusLabel, setStatusLabel] = useState<string | null>(null);
   const [showTurnPrompt, setShowTurnPrompt] = useState(false);
+
+  const [cameraMode, setCameraMode] = useState<"label" | "meal" | null>(null);
+  const [showCameraMenu, setShowCameraMenu] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -478,13 +484,92 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
     }
   }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer]);
 
+  const handleMealUpload = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file.");
+      return;
+    }
+
+    if (!hasStarted) {
+      setMessages([{
+        id: uid(),
+        role: "assistant",
+        content: DEFAULT_GREETING,
+        timestamp: new Date().toISOString(),
+        agentLabel: "Nova"
+      }]);
+      setHasStarted(true);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        role: "user",
+        content: "Analyze this meal",
+        timestamp: new Date().toISOString(),
+        imagePreview: previewUrl,
+      }
+    ]);
+
+    setStatusLabel("Analyzing meal with Nova AI...");
+    setIsStreaming(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const response = await fetch("/api/meal", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = (await response.json()) as MealAnalysis & { error?: string };
+
+      if (!response.ok || !result.success) {
+        addAssistantMessage(
+          result.error ?? "Could not analyze the meal photo. Please try again with a clearer image.",
+          "Nova"
+        );
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: "assistant",
+            content: result.summary,
+            timestamp: new Date().toISOString(),
+            agentLabel: "Nutrition AI",
+            mealResult: result,
+          }
+        ]);
+        speakText(result.summary);
+        startInactivityTimer();
+      }
+    } catch {
+      toast.error("Failed to analyze the meal.");
+      addAssistantMessage("Something went wrong. Try again with a different photo.", "Nova");
+    } finally {
+      setStatusLabel(null);
+      setIsStreaming(false);
+    }
+  }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer]);
+
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) void handleScanUpload(file);
+      if (file) {
+        if (cameraMode === "meal") {
+          void handleMealUpload(file);
+        } else {
+          void handleScanUpload(file);
+        }
+      }
       e.target.value = "";
+      setCameraMode(null);
     },
-    [handleScanUpload]
+    [handleScanUpload, handleMealUpload, cameraMode]
   );
 
   const handleVoiceTranscript = useCallback((text: string) => {
@@ -571,6 +656,9 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
               {message.scanResult && (
                 <NutritionScanCard data={message.scanResult} />
               )}
+              {message.mealResult && (
+                <MealAnalysisCard data={message.mealResult} />
+              )}
             </div>
           ))}
 
@@ -595,15 +683,37 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
         <div className="mx-auto flex max-w-2xl items-end gap-1.5">
           <VoiceButton onTranscript={handleVoiceTranscript} disabled={isStreaming} />
 
-          <button
-            type="button"
-            disabled={isStreaming}
-            onClick={() => fileInputRef.current?.click()}
-            className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-2xl border-[1.5px] border-white/40 bg-white/35 text-muted-foreground transition-all hover:text-foreground active:scale-95 disabled:opacity-40 dark:border-emerald-800/20 dark:bg-emerald-950/20"
-            title="Scan nutrition label"
-          >
-            <Camera className="h-4.5 w-4.5" />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              disabled={isStreaming}
+              onClick={() => setShowCameraMenu((v) => !v)}
+              className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-2xl border-[1.5px] border-white/40 bg-white/35 text-muted-foreground transition-all hover:text-foreground active:scale-95 disabled:opacity-40 dark:border-emerald-800/20 dark:bg-emerald-950/20"
+              title="Camera options"
+            >
+              <Camera className="h-4.5 w-4.5" />
+            </button>
+            {showCameraMenu && (
+              <div className="absolute bottom-full left-0 mb-2 w-48 overflow-hidden rounded-xl border border-white/40 bg-white/90 shadow-lg backdrop-blur-xl dark:border-emerald-800/30 dark:bg-emerald-950/90">
+                <button
+                  type="button"
+                  onClick={() => { setCameraMode("meal"); setShowCameraMenu(false); fileInputRef.current?.click(); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/40"
+                >
+                  <UtensilsCrossed className="h-4 w-4 text-emerald-600" />
+                  <span>Analyze meal</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCameraMode("label"); setShowCameraMenu(false); fileInputRef.current?.click(); }}
+                  className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
+                >
+                  <ScanBarcode className="h-4 w-4 text-amber-600" />
+                  <span>Scan label</span>
+                </button>
+              </div>
+            )}
+          </div>
           <input
             ref={fileInputRef}
             type="file"
