@@ -9,6 +9,7 @@ import {
   User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { t, type Lang, getLang } from "@/lib/i18n";
 
 export type TabId = "chat" | "dashboard" | "history" | "settings" | "profile";
 
@@ -17,12 +18,14 @@ interface BottomTabBarProps {
   onTabChange: (tab: TabId) => void;
 }
 
-const tabs: { id: TabId; label: string; icon: typeof MessageCircle }[] = [
-  { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "history", label: "History", icon: Clock },
-  { id: "settings", label: "Settings", icon: Settings },
-  { id: "profile", label: "Profile", icon: User },
+type TabLabelKey = "tab_chat" | "tab_dashboard" | "tab_history" | "tab_settings" | "tab_profile";
+
+const tabDefs: { id: TabId; labelKey: TabLabelKey; icon: typeof MessageCircle }[] = [
+  { id: "chat", labelKey: "tab_chat", icon: MessageCircle },
+  { id: "dashboard", labelKey: "tab_dashboard", icon: LayoutDashboard },
+  { id: "history", labelKey: "tab_history", icon: Clock },
+  { id: "settings", labelKey: "tab_settings", icon: Settings },
+  { id: "profile", labelKey: "tab_profile", icon: User },
 ];
 
 interface PillStyle {
@@ -34,11 +37,19 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [pill, setPill] = useState<PillStyle>({ left: 0, width: 0 });
+  const [lang, setLangState] = useState<Lang>("en");
 
   const activeIndex = useMemo(
-    () => tabs.findIndex((t) => t.id === activeTab),
+    () => tabDefs.findIndex((td) => td.id === activeTab),
     [activeTab]
   );
+
+  useEffect(() => {
+    setLangState(getLang());
+    const handler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
+    window.addEventListener("novafit-lang-change", handler);
+    return () => window.removeEventListener("novafit-lang-change", handler);
+  }, []);
 
   const updatePill = useCallback(() => {
     const container = containerRef.current;
@@ -72,7 +83,7 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
           }}
         />
 
-        {tabs.map(({ id, label, icon: Icon }, i) => {
+        {tabDefs.map(({ id, labelKey, icon: Icon }, i) => {
           const active = activeTab === id;
           return (
             <button
@@ -100,7 +111,7 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
                   active ? "font-semibold" : "font-medium"
                 )}
               >
-                {label}
+                {t(labelKey, lang)}
               </span>
             </button>
           );

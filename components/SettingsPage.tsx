@@ -4,7 +4,7 @@ import { Volume2, Watch, Globe, Palette, Info, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import { clearHistory } from "@/components/HistoryPage";
-import { getLang, setLang, type Lang } from "@/lib/i18n";
+import { getLang, setLang, t, type Lang } from "@/lib/i18n";
 
 interface SettingsPageProps {
   voiceOutput: boolean;
@@ -44,7 +44,6 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
   const [lang, setLangState] = useState<Lang>("en");
 
   useEffect(() => {
-    // Sync theme state with DOM after hydration
     setDark(document.documentElement.classList.contains("dark")); // eslint-disable-line react-hooks/set-state-in-effect
     setLangState(getLang()); // eslint-disable-line react-hooks/set-state-in-effect
   }, []);
@@ -53,7 +52,6 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
     const newLang: Lang = lang === "en" ? "pl" : "en";
     setLangState(newLang);
     setLang(newLang);
-    // Dispatch event so other components can react
     window.dispatchEvent(new CustomEvent("novafit-lang-change", { detail: newLang }));
   };
 
@@ -61,6 +59,8 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
     setDark(checked);
     document.documentElement.classList.toggle("dark", checked);
     localStorage.setItem("nova-theme", checked ? "dark" : "light");
+    // Update status bar for contrast
+    window.dispatchEvent(new CustomEvent("novafit-theme-change", { detail: checked ? "dark" : "light" }));
   };
 
   const handleClearSession = () => {
@@ -77,15 +77,15 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
       <div className="stagger-children mx-auto max-w-lg space-y-4">
         <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
-          Settings
+          {t("settings", lang)}
         </h2>
 
         {/* Voice */}
         <div className="glass-panel divide-y divide-border/30 rounded-2xl px-4">
           <SettingRow
             icon={<Volume2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
-            label="Voice Output"
-            description="Read assistant replies aloud"
+            label={t("voice_output", lang)}
+            description={t("voice_output_desc", lang)}
           >
             <Switch checked={voiceOutput} onCheckedChange={onVoiceOutputChange} />
           </SettingRow>
@@ -95,8 +95,8 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
         <div className="glass-panel divide-y divide-border/30 rounded-2xl px-4">
           <SettingRow
             icon={<Watch className="h-4 w-4 text-blue-500" />}
-            label="Mock Wearable Data"
-            description="Use simulated health metrics"
+            label={t("mock_wearable", lang)}
+            description={t("mock_wearable_desc", lang)}
           >
             <Switch checked={mockWearable} onCheckedChange={setMockWearable} />
           </SettingRow>
@@ -106,15 +106,15 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
         <div className="glass-panel divide-y divide-border/30 rounded-2xl px-4">
           <SettingRow
             icon={<Globe className="h-4 w-4 text-indigo-500" />}
-            label="Language"
-            description={lang === "en" ? "App display language" : "Język wyświetlania aplikacji"}
+            label={t("language", lang)}
+            description={t("language_desc", lang)}
           >
             <button
               type="button"
               onClick={toggleLang}
               className="flex items-center gap-1 rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-muted/80"
             >
-              {lang === "en" ? "🇬🇧 EN" : "🇵🇱 PL"}
+              {lang === "en" ? "EN" : "PL"}
             </button>
           </SettingRow>
         </div>
@@ -123,8 +123,8 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
         <div className="glass-panel divide-y divide-border/30 rounded-2xl px-4">
           <SettingRow
             icon={<Palette className="h-4 w-4 text-violet-500" />}
-            label="Dark Mode"
-            description="Switch between light and dark theme"
+            label={t("dark_mode", lang)}
+            description={t("dark_mode_desc", lang)}
           >
             <Switch checked={dark} onCheckedChange={toggleTheme} />
           </SettingRow>
@@ -134,7 +134,7 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
         <div className="glass-panel rounded-2xl px-4 py-4">
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-muted-foreground" />
-            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">About</span>
+            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">{t("about", lang)}</span>
           </div>
           <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
             <p>Nova Health Agent v0.1.0</p>
@@ -145,7 +145,7 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
 
         {/* Danger zone */}
         <div className="rounded-2xl border border-destructive/20 px-4 py-4">
-          <span className="text-xs font-semibold text-destructive">Danger Zone</span>
+          <span className="text-xs font-semibold text-destructive">{t("danger_zone", lang)}</span>
           <div className="mt-2 flex gap-2">
             <button
               type="button"
@@ -153,7 +153,7 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
               className="flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
             >
               <Trash2 className="h-3 w-3" />
-              Clear Session
+              {t("clear_session", lang)}
             </button>
             <button
               type="button"
@@ -161,7 +161,7 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
               className="flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
             >
               <Trash2 className="h-3 w-3" />
-              Clear History
+              {t("clear_history", lang)}
             </button>
           </div>
         </div>

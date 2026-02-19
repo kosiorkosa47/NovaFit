@@ -16,26 +16,38 @@ export function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [voiceOutput, setVoiceOutput] = useState(true);
 
-  // Configure Android status bar — dark icons on light background
+  // Configure Android status bar — adapt to theme
   useEffect(() => {
-    async function configureStatusBar() {
+    async function updateStatusBar(isDark: boolean) {
       try {
         const { StatusBar, Style } = await import("@capacitor/status-bar");
-        await StatusBar.setStyle({ style: Style.Light }); // Dark icons
-        await StatusBar.setBackgroundColor({ color: "#ecfdf5" }); // Emerald-50
+        // Light style = dark icons (for light bg), Dark style = light icons (for dark bg)
+        await StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light });
+        await StatusBar.setBackgroundColor({ color: isDark ? "#022c22" : "#ecfdf5" });
         await StatusBar.setOverlaysWebView({ overlay: false });
       } catch {
-        // Not in native app — use meta tag fallback
+        // Web fallback — meta theme-color
         let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
         if (!meta) {
           meta = document.createElement("meta");
           meta.name = "theme-color";
           document.head.appendChild(meta);
         }
-        meta.content = "#ecfdf5";
+        meta.content = isDark ? "#022c22" : "#ecfdf5";
       }
     }
-    void configureStatusBar();
+
+    // Initial sync
+    const isDark = document.documentElement.classList.contains("dark");
+    void updateStatusBar(isDark);
+
+    // Listen for theme changes from Settings
+    const handler = (e: Event) => {
+      const theme = (e as CustomEvent).detail as string;
+      void updateStatusBar(theme === "dark");
+    };
+    window.addEventListener("novafit-theme-change", handler);
+    return () => window.removeEventListener("novafit-theme-change", handler);
   }, []);
 
   const switchToChat = useCallback((sessionId?: string) => {

@@ -107,14 +107,47 @@ const translations = {
   "tap_collapse": { en: "Tap to collapse", pl: "Kliknij aby zwinąć" },
 
   // Settings
+  "settings": { en: "Settings", pl: "Ustawienia" },
   "language": { en: "Language", pl: "Język" },
   "language_desc": { en: "App display language", pl: "Język wyświetlania aplikacji" },
+  "voice_output": { en: "Voice Output", pl: "Wyjście głosowe" },
+  "voice_output_desc": { en: "Read assistant replies aloud", pl: "Odczytuj odpowiedzi asystenta na głos" },
+  "mock_wearable": { en: "Mock Wearable Data", pl: "Symulowane dane sensorów" },
+  "mock_wearable_desc": { en: "Use simulated health metrics", pl: "Użyj symulowanych danych zdrowotnych" },
+  "dark_mode": { en: "Dark Mode", pl: "Tryb ciemny" },
+  "dark_mode_desc": { en: "Switch between light and dark theme", pl: "Przełącz między jasnym a ciemnym motywem" },
+  "about": { en: "About", pl: "O aplikacji" },
+  "danger_zone": { en: "Danger Zone", pl: "Strefa zagrożenia" },
+  "clear_session": { en: "Clear Session", pl: "Wyczyść sesję" },
+  "clear_history": { en: "Clear History", pl: "Wyczyść historię" },
 
   // History
   "no_conversations": { en: "No conversations yet. Start chatting to see your history here.", pl: "Brak rozmów. Zacznij czat, żeby zobaczyć historię." },
   "start_conversation": { en: "Start a conversation", pl: "Rozpocznij rozmowę" },
   "conversation_history": { en: "Conversation History", pl: "Historia rozmów" },
   "clear": { en: "Clear", pl: "Wyczyść" },
+
+  // Bottom tab bar
+  "tab_chat": { en: "Chat", pl: "Czat" },
+  "tab_dashboard": { en: "Dashboard", pl: "Panel" },
+  "tab_history": { en: "History", pl: "Historia" },
+  "tab_settings": { en: "Settings", pl: "Ustawienia" },
+  "tab_profile": { en: "Profile", pl: "Profil" },
+
+  // Profile
+  "setup_profile": { en: "Set up your profile", pl: "Skonfiguruj profil" },
+  "enter_name": { en: "Enter your name to personalize your experience", pl: "Wpisz imię, aby spersonalizować doświadczenie" },
+  "your_name": { en: "Your name", pl: "Twoje imię" },
+  "save": { en: "Save", pl: "Zapisz" },
+  "saved": { en: "Saved!", pl: "Zapisano!" },
+  "health_facts": { en: "Health Facts", pl: "Fakty zdrowotne" },
+  "health_facts_empty": { en: "Chat with Nova to discover your health preferences and allergies. They will appear here.", pl: "Porozmawiaj z Novą, aby odkryć swoje preferencje zdrowotne. Pojawią się tutaj." },
+  "daily_goals_label": { en: "Daily Goals", pl: "Cele dzienne" },
+
+  // Chat
+  "analyze_meal": { en: "Analyze meal", pl: "Analizuj posiłek" },
+  "scan_label": { en: "Scan label", pl: "Skanuj etykietę" },
+  "tell_feeling": { en: "Tell me how you're feeling...", pl: "Powiedz jak się czujesz..." },
 } as const;
 
 type TranslationKey = keyof typeof translations;

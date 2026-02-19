@@ -16,6 +16,7 @@ import type { ScanResponse } from "@/app/api/scan/route";
 import type { MealAnalysis } from "@/app/api/meal/route";
 import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
 import { saveHistoryEntry } from "@/components/HistoryPage";
+import { t, getLang, type Lang } from "@/lib/i18n";
 
 /** Safe unique ID — fallback for HTTP (no secure context) */
 function uid(): string {
@@ -181,18 +182,23 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
 
   const [cameraMode, setCameraMode] = useState<"label" | "meal" | null>(null);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
+  const [lang, setLangState] = useState<Lang>("en");
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Initialize session
+  // Initialize session + lang
   useEffect(() => {
     const existingSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
     const safeSession = ensureSessionId(existingSession ?? undefined);
     window.localStorage.setItem(SESSION_STORAGE_KEY, safeSession);
     setSessionId(safeSession);
+    setLangState(getLang());
+    const handler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
+    window.addEventListener("novafit-lang-change", handler);
+    return () => window.removeEventListener("novafit-lang-change", handler);
   }, []);
 
   // Auto-scroll to bottom
@@ -663,7 +669,7 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Tell me how you're feeling..."
+              placeholder={t("tell_feeling", lang)}
               disabled={isStreaming}
               rows={1}
               className="min-h-[44px] flex-1 resize-none rounded-2xl border-[1.5px] border-white/40 bg-white/35 px-3.5 py-2.5 text-sm shadow-[inset_0_2px_4px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.5)] placeholder:text-muted-foreground/50 focus-zen disabled:opacity-50 dark:border-emerald-800/20 dark:bg-emerald-950/20 dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.04)]"
@@ -768,7 +774,7 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
                   className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/40"
                 >
                   <UtensilsCrossed className="h-4 w-4 text-emerald-600" />
-                  <span>Analyze meal</span>
+                  <span>{t("analyze_meal", lang)}</span>
                 </button>
                 <button
                   type="button"
@@ -785,7 +791,7 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
                   className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
                 >
                   <ScanBarcode className="h-4 w-4 text-amber-600" />
-                  <span>Scan label</span>
+                  <span>{t("scan_label", lang)}</span>
                 </button>
               </div>
             )}
@@ -804,7 +810,7 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
             value={input}
             onChange={(e) => { setInput(e.target.value); resetInactivityTimer(); }}
             onKeyDown={handleInputKeyDown}
-            placeholder="Tell me how you're feeling..."
+            placeholder={t("tell_feeling", lang)}
             disabled={isStreaming}
             rows={1}
             className="min-h-[44px] flex-1 resize-none rounded-2xl border-[1.5px] border-white/40 bg-white/35 px-3.5 py-2.5 text-sm shadow-[inset_0_2px_4px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.5)] placeholder:text-muted-foreground/50 focus-zen disabled:opacity-50 dark:border-emerald-800/20 dark:bg-emerald-950/20 dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.04)]"

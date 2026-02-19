@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { User, Heart, Target, Save, Camera } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { t, getLang, type Lang } from "@/lib/i18n";
 
 const PROFILE_KEY = "nova-health-profile";
 
 interface ProfileData {
   name: string;
-  photo?: string; // base64 data URL
+  photo?: string;
   createdAt: string;
 }
 
@@ -41,18 +42,14 @@ function getUserFacts(): string[] {
   try {
     const raw = localStorage.getItem("nova-health-user-facts");
     if (raw) return JSON.parse(raw) as string[];
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
   return [];
 }
 
-/** Check if running inside Capacitor native app */
 function isNative(): boolean {
   return typeof window !== "undefined" && !!(window as unknown as Record<string, unknown>).Capacitor;
 }
 
-/** Resize image to max 200x200 and return as base64 data URL */
 function resizeImage(file: File): Promise<string> {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -80,6 +77,7 @@ export function ProfilePage() {
   const [saved, setSaved] = useState(false);
   const [profileExists, setProfileExists] = useState(false);
   const [facts, setFacts] = useState<string[]>([]);
+  const [lang, setLangState] = useState<Lang>("en");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -90,6 +88,10 @@ export function ProfilePage() {
       setProfileExists(true);
     }
     setFacts(getUserFacts());
+    setLangState(getLang());
+    const handler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
+    window.addEventListener("novafit-lang-change", handler);
+    return () => window.removeEventListener("novafit-lang-change", handler);
   }, []);
 
   const handleSave = () => {
@@ -114,10 +116,6 @@ export function ProfilePage() {
           source: CameraSource.Prompt,
           width: 400,
           height: 400,
-          promptLabelHeader: "Profile Photo",
-          promptLabelPhoto: "Take Photo",
-          promptLabelPicture: "Choose from Gallery",
-          promptLabelCancel: "Cancel",
         });
         if (!result.base64String) return;
         const byteString = atob(result.base64String);
@@ -127,7 +125,7 @@ export function ProfilePage() {
         const mime = result.format === "png" ? "image/png" : "image/jpeg";
         imageFile = new File([ab], `photo.${result.format}`, { type: mime });
       } catch {
-        return; // cancelled
+        return;
       }
     } else if (file) {
       imageFile = file;
@@ -136,7 +134,6 @@ export function ProfilePage() {
     if (!imageFile) return;
     const dataUrl = await resizeImage(imageFile);
     setPhoto(dataUrl);
-    // Auto-save if profile already exists
     if (profileExists && name.trim()) {
       saveProfile({ name: name.trim(), photo: dataUrl, createdAt: new Date().toISOString() });
       setSaved(true);
@@ -153,55 +150,62 @@ export function ProfilePage() {
   };
 
   const goals = [
-    { label: "Steps", value: "8,000 / day" },
-    { label: "Water", value: "8 glasses / day" },
-    { label: "Sleep", value: "7 hours / night" },
-    { label: "Exercise", value: "30 min / day" },
+    { label: lang === "pl" ? "Kroki" : "Steps", value: "8,000" },
+    { label: lang === "pl" ? "Woda" : "Water", value: lang === "pl" ? "8 szklanek" : "8 glasses" },
+    { label: lang === "pl" ? "Sen" : "Sleep", value: lang === "pl" ? "7 godz" : "7 hours" },
+    { label: lang === "pl" ? "Ćwiczenia" : "Exercise", value: "30 min" },
   ];
 
-  // Setup view — only shown when no profile has been saved yet
+  const photoInput = (
+    <input
+      ref={photoInputRef}
+      type="file"
+      accept="image/*"
+      onChange={(e) => {
+        const f = e.target.files?.[0];
+        if (f) void handlePhotoSelect("file", f);
+        e.target.value = "";
+      }}
+      className="hidden"
+    />
+  );
+
+  const avatarButton = (size: string, bg: string) => (
+    <button
+      type="button"
+      onClick={handlePhotoClick}
+      className={`group relative flex ${size} items-center justify-center rounded-full ${bg}`}
+    >
+      {photo ? (
+        <img src={photo} alt="Profile" className={`${size} rounded-full object-cover`} />
+      ) : (
+        <User className="h-9 w-9 text-emerald-600 dark:text-emerald-400" />
+      )}
+      <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-active:opacity-100">
+        <Camera className="h-5 w-5 text-white" />
+      </div>
+    </button>
+  );
+
+  // Setup view
   if (!profileExists) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6">
-        {/* Avatar with photo option */}
-        <button
-          type="button"
-          onClick={handlePhotoClick}
-          className="group relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/60"
-        >
-          {photo ? (
-            <img src={photo} alt="Profile" className="h-20 w-20 rounded-full object-cover" />
-          ) : (
-            <User className="h-9 w-9 text-emerald-600 dark:text-emerald-400" />
-          )}
-          <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-active:opacity-100">
-            <Camera className="h-5 w-5 text-white" />
-          </div>
-        </button>
-        <input
-          ref={photoInputRef}
-          type="file"
-          accept="image/*"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void handlePhotoSelect("file", f);
-            e.target.value = "";
-          }}
-          className="hidden"
-        />
+        {avatarButton("h-20 w-20", "bg-emerald-100 dark:bg-emerald-900/60")}
+        {photoInput}
         <div className="text-center">
-          <h2 className="text-lg font-semibold">Set up your profile</h2>
+          <h2 className="text-lg font-semibold">{t("setup_profile", lang)}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Enter your name to personalize your experience
+            {t("enter_name", lang)}
           </p>
         </div>
-        <div className="flex w-full max-w-xs gap-2">
+        <div className="flex w-full max-w-xs items-center justify-center gap-2">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            placeholder="Your name"
+            placeholder={t("your_name", lang)}
             className="flex-1 rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <button
@@ -210,7 +214,7 @@ export function ProfilePage() {
             disabled={!name.trim()}
             className="rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-40"
           >
-            Save
+            {t("save", lang)}
           </button>
         </div>
       </div>
@@ -220,7 +224,7 @@ export function ProfilePage() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
       <div className="stagger-children mx-auto max-w-lg space-y-4">
-        {/* Avatar + name */}
+        {/* Avatar + name — centered */}
         <div className="flex flex-col items-center gap-3 py-4">
           <button
             type="button"
@@ -238,18 +242,9 @@ export function ProfilePage() {
               <Camera className="h-5 w-5 text-white" />
             </div>
           </button>
-          <input
-            ref={photoInputRef}
-            type="file"
-            accept="image/*"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handlePhotoSelect("file", f);
-              e.target.value = "";
-            }}
-            className="hidden"
-          />
-          <div className="flex items-center gap-2">
+          {photoInput}
+          {/* Centered name input row */}
+          <div className="flex items-center justify-center gap-2">
             <input
               type="text"
               value={name}
@@ -258,7 +253,7 @@ export function ProfilePage() {
                 setSaved(false);
               }}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="w-48 rounded-lg border border-input bg-background px-2 py-1 text-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-48 rounded-lg border border-input bg-background px-2 py-1.5 text-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <button
               type="button"
@@ -270,7 +265,7 @@ export function ProfilePage() {
           </div>
           {saved && (
             <span className="animate-fade-in-up text-xs text-emerald-600 dark:text-emerald-400">
-              Saved!
+              {t("saved", lang)}
             </span>
           )}
         </div>
@@ -279,7 +274,7 @@ export function ProfilePage() {
         <div className="glass-panel rounded-2xl px-4 py-4">
           <div className="flex items-center gap-2">
             <Heart className="h-4 w-4 text-rose-400" />
-            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">Health Facts</span>
+            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">{t("health_facts", lang)}</span>
           </div>
           {facts.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -291,7 +286,7 @@ export function ProfilePage() {
             </div>
           ) : (
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Chat with Nova to discover your health preferences and allergies. They will appear here.
+              {t("health_facts_empty", lang)}
             </p>
           )}
         </div>
@@ -300,7 +295,7 @@ export function ProfilePage() {
         <div className="glass-panel rounded-2xl px-4 py-4">
           <div className="flex items-center gap-2">
             <Target className="h-4 w-4 text-emerald-500" />
-            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">Daily Goals</span>
+            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">{t("daily_goals_label", lang)}</span>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {goals.map((g) => (

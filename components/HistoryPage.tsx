@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Clock, MessageCircle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { t, getLang, type Lang } from "@/lib/i18n";
 
 const STORAGE_KEY = "nova-health-history";
 
@@ -26,14 +27,12 @@ export function getHistory(): HistoryEntry[] {
 
 export function saveHistoryEntry(entry: HistoryEntry) {
   const existing = getHistory();
-  // Update existing or push new
   const idx = existing.findIndex((e) => e.sessionId === entry.sessionId);
   if (idx >= 0) {
     existing[idx] = entry;
   } else {
     existing.unshift(entry);
   }
-  // Keep last 50
   localStorage.setItem(STORAGE_KEY, JSON.stringify(existing.slice(0, 50)));
 }
 
@@ -49,10 +48,14 @@ interface HistoryPageProps {
 
 export function HistoryPage({ onOpenSession }: HistoryPageProps) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  const [lang, setLangState] = useState<Lang>("en");
 
   useEffect(() => {
-    // Client-only read from localStorage on mount
     setEntries(getHistory()); // eslint-disable-line react-hooks/set-state-in-effect
+    setLangState(getLang());
+    const handler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
+    window.addEventListener("novafit-lang-change", handler);
+    return () => window.removeEventListener("novafit-lang-change", handler);
   }, []);
 
   if (entries.length === 0) {
@@ -62,25 +65,27 @@ export function HistoryPage({ onOpenSession }: HistoryPageProps) {
           <Clock className="h-7 w-7 text-muted-foreground" />
         </div>
         <p className="text-center text-sm text-muted-foreground">
-          No conversations yet. Start chatting to see your history here.
+          {t("no_conversations", lang)}
         </p>
         <button
           type="button"
           onClick={() => onOpenSession()}
           className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
         >
-          Start a conversation
+          {t("start_conversation", lang)}
         </button>
       </div>
     );
   }
+
+  const dateLang = lang === "pl" ? "pl-PL" : "en-US";
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
       <div className="stagger-children mx-auto max-w-lg space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
-            Conversation History
+            {t("conversation_history", lang)}
           </h2>
           <button
             type="button"
@@ -91,7 +96,7 @@ export function HistoryPage({ onOpenSession }: HistoryPageProps) {
             className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:text-destructive"
           >
             <Trash2 className="h-3 w-3" />
-            Clear
+            {t("clear", lang)}
           </button>
         </div>
 
@@ -106,7 +111,7 @@ export function HistoryPage({ onOpenSession }: HistoryPageProps) {
             >
               <div className="flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground">
-                  {date.toLocaleDateString("en-US")} {date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                  {date.toLocaleDateString(dateLang)} {date.toLocaleTimeString(dateLang, { hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <MessageCircle className="h-3 w-3" />
@@ -118,9 +123,9 @@ export function HistoryPage({ onOpenSession }: HistoryPageProps) {
               </p>
               {entry.topics.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {entry.topics.map((t) => (
-                    <Badge key={t} variant="secondary" className="text-[9px] px-1.5 py-0">
-                      {t}
+                  {entry.topics.map((topic) => (
+                    <Badge key={topic} variant="secondary" className="text-[9px] px-1.5 py-0">
+                      {topic}
                     </Badge>
                   ))}
                 </div>
