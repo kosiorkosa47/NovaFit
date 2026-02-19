@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { getLang } from "@/lib/i18n";
 
 interface VoiceButtonProps {
   onTranscript: (text: string) => void;
@@ -200,7 +201,7 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       if (Ctor) {
         try {
           const recognition = new Ctor();
-          recognition.lang = "pl-PL";
+          recognition.lang = getLang() === "pl" ? "pl-PL" : "en-US";
           recognition.continuous = false;
           recognition.interimResults = false;
           recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {

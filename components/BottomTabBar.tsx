@@ -93,7 +93,7 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
               onClick={() => onTabChange(id)}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "relative z-10 flex flex-1 flex-col items-center gap-0.5 py-1.5 transition-all duration-300 ease-zen",
+                "relative z-10 flex flex-1 flex-col items-center gap-0.5 py-2.5 transition-all duration-300 ease-zen",
                 active
                   ? "text-emerald-600 dark:text-emerald-400"
                   : "text-muted-foreground/70 hover:text-foreground"

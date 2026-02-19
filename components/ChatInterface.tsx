@@ -198,7 +198,7 @@ function WelcomeScreen({ onVoiceTranscript }: { onVoiceTranscript: (text: string
         ))}
       </div>
 
-      <p className="relative text-[11px] font-light tracking-wider text-muted-foreground/50">
+      <p className="relative text-xs font-medium tracking-wide text-muted-foreground/70">
         Tap the mic or type below
       </p>
     </div>
@@ -948,7 +948,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
               <button
                 type="button"
                 onClick={clearPendingImage}
-                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm"
+                className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white shadow-sm"
               >
                 ✕
               </button>

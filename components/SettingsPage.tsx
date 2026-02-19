@@ -79,11 +79,13 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
   };
 
   const handleClearSession = () => {
+    if (!window.confirm(lang === "pl" ? "Na pewno wyczyścić sesję?" : "Clear current session?")) return;
     localStorage.removeItem("nova-health-session-id");
     window.location.reload();
   };
 
   const handleClearHistory = () => {
+    if (!window.confirm(lang === "pl" ? "Na pewno usunąć całą historię?" : "Delete all conversation history?")) return;
     clearHistory();
     window.location.reload();
   };

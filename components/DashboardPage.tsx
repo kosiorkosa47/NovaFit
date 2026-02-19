@@ -463,7 +463,7 @@ export function DashboardPage() {
 
   const dayLabels = getDayLabels(lang);
 
-  if (loading) return <div className="flex flex-1 items-center justify-center"><RefreshCw className="h-6 w-6 animate-spin text-emerald-500" /></div>;
+  if (loading) return <div className="flex flex-1 flex-col items-center justify-center gap-3"><RefreshCw className="h-6 w-6 animate-spin text-emerald-500" /><span className="text-xs font-medium text-muted-foreground/70">{lang === "pl" ? "Ładowanie danych zdrowia..." : "Loading health data..."}</span></div>;
 
   const health = sensorData ?? { steps: snapshot?.steps ?? 0, heartRate: snapshot?.averageHeartRate ?? null, sleep: snapshot?.sleepHours ?? 7, calories: 0, distance: 0, stress: 35, lastUpdated: new Date().toISOString(), source: "mock" as const };
   const insights = generateInsights(health, lang);
