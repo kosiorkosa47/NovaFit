@@ -229,7 +229,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const cameraMenuRef = useRef<HTMLDivElement | null>(null);
   const lastInputWasVoiceRef = useRef(false);
@@ -1034,7 +1035,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                   onClick={() => {
                     setShowCameraMenu(false);
                     cameraModeRef.current = "meal";
-                    fileInputRef.current?.click();
+                    cameraInputRef.current?.click();
                   }}
                   className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/40"
                 >
@@ -1046,7 +1047,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                   onClick={() => {
                     setShowCameraMenu(false);
                     cameraModeRef.current = "label";
-                    fileInputRef.current?.click();
+                    cameraInputRef.current?.click();
                   }}
                   className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
                 >
@@ -1067,13 +1068,24 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
               </div>
             )}
           </div>
+          {/* Camera input — opens rear camera directly (meal/scan) */}
           <input
-            ref={fileInputRef}
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileInputChange}
+            className="sr-only"
+          />
+          {/* Gallery input — opens file chooser (meal/scan fallback) */}
+          <input
+            ref={galleryInputRef}
             type="file"
             accept="image/*"
             onChange={handleFileInputChange}
             className="sr-only"
           />
+          {/* Image attach input — for "Ask about photo" */}
           <input
             ref={imageInputRef}
             type="file"
