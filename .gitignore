@@ -11,3 +11,15 @@ coverage
 
 *.tsbuildinfo
 .vercel
+
+# Android build artifacts
+android/app/build/
+android/.gradle/
+android/build/
+android/capacitor-cordova-android-plugins/build/
+*.apk
+www/
+
+# Capacitor generated
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json

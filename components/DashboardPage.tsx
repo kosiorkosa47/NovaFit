@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Footprints,
   Heart,
@@ -9,10 +9,13 @@ import {
   Droplets,
   Dumbbell,
   RefreshCw,
+  Smartphone,
+  Wifi,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import type { WearableSnapshot } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { getHealthData, isNativeApp, getAvailableSensors, startWebStepTracking, type HealthData } from "@/lib/sensors/health-bridge";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -158,6 +161,8 @@ function GoalRow({
 
 export function DashboardPage() {
   const [snapshot, setSnapshot] = useState<WearableSnapshot | null>(null);
+  const [sensorData, setSensorData] = useState<HealthData | null>(null);
+  const [sensorSource, setSensorSource] = useState<string>("loading");
   const [loading, setLoading] = useState(true);
 
   const sessionId =
@@ -165,24 +170,46 @@ export function DashboardPage() {
       ? window.localStorage.getItem("nova-health-session-id") ?? "demo"
       : "demo";
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // Try real sensors first (native app or web sensors)
+      const health = await getHealthData();
+      setSensorData(health);
+      setSensorSource(health.source);
+
+      // Also fetch API snapshot for trends/goals
       const res = await fetch(`/api/wearable?sessionId=${encodeURIComponent(sessionId)}`);
       if (res.ok) {
-        setSnapshot(await res.json() as WearableSnapshot);
+        const snap = await res.json() as WearableSnapshot;
+        // Override with real sensor data if available
+        if (health.source !== "mock") {
+          snap.steps = health.steps;
+          if (health.heartRate) snap.averageHeartRate = health.heartRate;
+          if (health.sleep) snap.sleepHours = health.sleep;
+        }
+        setSnapshot(snap);
       }
     } catch {
       // silently fail — show empty state
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
 
   useEffect(() => {
     void fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    // Start web step tracking if available
+    startWebStepTracking();
+
+    // Check what sensors are available
+    void getAvailableSensors().then(sensors => {
+      if (sensors.length > 0) {
+        console.log("Available sensors:", sensors);
+      }
+    });
+  }, [fetchData]);
 
   // Generate 7-day trend data from session seed
   const stepsWeek = Array.from({ length: 7 }, (_, i) =>
@@ -227,9 +254,22 @@ export function DashboardPage() {
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
       <div className="stagger-children mx-auto max-w-lg space-y-4">
         {/* Section: Wearable data */}
-        <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
-          Today&apos;s Snapshot
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+            Today&apos;s Snapshot
+          </h2>
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
+            {sensorSource === "android-sensors" ? (
+              <><Smartphone className="h-3 w-3" /> Phone Sensors</>
+            ) : sensorSource === "health-connect" ? (
+              <><Smartphone className="h-3 w-3 text-emerald-500" /> Health Connect</>
+            ) : sensorSource === "web-sensors" ? (
+              <><Wifi className="h-3 w-3" /> Web Sensors</>
+            ) : (
+              <><Wifi className="h-3 w-3" /> Simulated</>
+            )}
+          </div>
+        </div>
         {snapshot && (
           <div className="stagger-children grid grid-cols-2 gap-2">
             <MetricCard
