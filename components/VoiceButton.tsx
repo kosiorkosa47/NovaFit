@@ -20,9 +20,13 @@ interface VoiceResponse {
   error?: string;
 }
 
+const SILENCE_TIMEOUT_MS = 2000; // Auto-stop after 2s of silence
+const MAX_RECORDING_MS = 15000; // Max 15s recording
+
 /**
  * VoiceButton — records audio via MediaRecorder, sends to Nova Sonic,
  * plays back audio response and returns transcript.
+ * Auto-stops after silence or max duration.
  * Falls back to browser SpeechRecognition if MediaRecorder unavailable.
  */
 export function VoiceButton({ onTranscript, size = "default", disabled = false }: VoiceButtonProps): React.ReactElement {
@@ -33,6 +37,16 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTimers = useCallback(() => {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
+    if (silenceCheckRef.current) { clearInterval(silenceCheckRef.current); silenceCheckRef.current = null; }
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -40,8 +54,9 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       mediaRecorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       audioContextRef.current?.close();
+      clearTimers();
     };
-  }, []);
+  }, [clearTimers]);
 
   const playAudioResponse = useCallback(async (audioBase64: string, sampleRate: number) => {
     if (!audioBase64) return;
@@ -132,7 +147,7 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
     if (!Ctor) return;
 
     const recognition = new Ctor();
-    recognition.lang = "en-US";
+    recognition.lang = "pl-PL"; // Polish first, falls back to auto-detect
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
@@ -143,6 +158,14 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
     recognition.onerror = () => setIsListening(false);
     try { recognition.start(); setIsListening(true); } catch { /* ignore */ }
   }, [onTranscript]);
+
+  const stopRecording = useCallback(() => {
+    clearTimers();
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsListening(false);
+  }, [clearTimers]);
 
   const startRecording = useCallback(async () => {
     try {
@@ -157,6 +180,15 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       streamRef.current = stream;
       chunksRef.current = [];
 
+      // Set up silence detection via AnalyserNode
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
@@ -170,26 +202,52 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
 
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        audioCtx.close().catch(() => {});
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         if (blob.size > 0) {
           void sendToNovaSonic(blob);
         }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(250); // Collect data every 250ms
       setIsListening(true);
+
+      // --- Auto-stop: silence detection ---
+      let silentFrames = 0;
+      const SILENCE_THRESHOLD = 15; // RMS level below which = silence
+      const FRAMES_FOR_SILENCE = Math.ceil(SILENCE_TIMEOUT_MS / 100); // 20 frames at 100ms
+
+      silenceCheckRef.current = setInterval(() => {
+        if (!analyserRef.current) return;
+        const data = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(data);
+
+        // Calculate RMS energy
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const avg = sum / data.length;
+
+        if (avg < SILENCE_THRESHOLD) {
+          silentFrames++;
+          if (silentFrames >= FRAMES_FOR_SILENCE) {
+            // Silence detected — auto-stop
+            stopRecording();
+          }
+        } else {
+          silentFrames = 0; // Reset on voice detected
+        }
+      }, 100);
+
+      // --- Auto-stop: max duration ---
+      maxTimerRef.current = setTimeout(() => {
+        stopRecording();
+      }, MAX_RECORDING_MS);
+
     } catch {
       // Mic permission denied — fallback
       fallbackBrowserSTT();
     }
-  }, [sendToNovaSonic, fallbackBrowserSTT]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.stop();
-    }
-    setIsListening(false);
-  }, []);
+  }, [sendToNovaSonic, fallbackBrowserSTT, stopRecording, clearTimers]);
 
   const toggleListening = useCallback(() => {
     if (disabled || isProcessing) return;
@@ -223,12 +281,12 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         (disabled || isProcessing) && "opacity-50 cursor-not-allowed"
       )}
       title={
-        isProcessing ? "Processing..." :
-        isListening ? "Stop listening" :
-        isPlaying ? "Playing response" :
-        "Talk to Nova"
+        isProcessing ? "Przetwarzanie..." :
+        isListening ? "Nagrywam... (auto-stop po ciszy)" :
+        isPlaying ? "Odtwarzam odpowiedź" :
+        "Mów do Nova"
       }
-      aria-label={isListening ? "Stop voice input" : "Start voice input"}
+      aria-label={isListening ? "Zatrzymaj nagrywanie" : "Rozpocznij nagrywanie"}
     >
       {showSpinner ? (
         <div className={cn("animate-spin rounded-full border-2 border-white border-t-transparent", isLarge ? "h-8 w-8" : "h-5 w-5")} />

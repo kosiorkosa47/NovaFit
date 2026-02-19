@@ -15,6 +15,7 @@ import type { WearableSnapshot } from "@/lib/types";
 import type { ScanResponse } from "@/app/api/scan/route";
 import type { MealAnalysis } from "@/app/api/meal/route";
 import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
+import { saveHistoryEntry } from "@/components/HistoryPage";
 
 /** Safe unique ID — fallback for HTTP (no secure context) */
 function uid(): string {
@@ -404,6 +405,29 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
     } finally {
       setStatusLabel(null);
       setIsStreaming(false);
+
+      // Save to conversation history
+      setMessages((current) => {
+        const userMsgs = current.filter((m) => m.role === "user");
+        if (userMsgs.length > 0) {
+          const firstUserMsg = userMsgs[0].content;
+          const topics: string[] = [];
+          if (current.some((m) => m.plan)) topics.push("plan");
+          if (current.some((m) => m.scanResult)) topics.push("scan");
+          if (current.some((m) => m.mealResult)) topics.push("meal");
+          if (current.some((m) => m.content.toLowerCase().includes("exercise") || m.content.toLowerCase().includes("ćwicz"))) topics.push("exercise");
+          if (current.some((m) => m.content.toLowerCase().includes("diet") || m.content.toLowerCase().includes("dieta"))) topics.push("diet");
+
+          saveHistoryEntry({
+            sessionId,
+            timestamp: new Date().toISOString(),
+            firstMessage: firstUserMsg.slice(0, 100),
+            messageCount: current.length,
+            topics: topics.slice(0, 4),
+          });
+        }
+        return current;
+      });
     }
   }, [addAssistantMessage, addUserMessage, handleStreamResponse, hasStarted, input, isStreaming, sessionId]);
 

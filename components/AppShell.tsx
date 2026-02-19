@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 import { BottomTabBar, type TabId } from "@/components/BottomTabBar";
 import { ChatInterface } from "@/components/ChatInterface";
@@ -15,6 +15,28 @@ const SESSION_STORAGE_KEY = "nova-health-session-id";
 export function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [voiceOutput, setVoiceOutput] = useState(true);
+
+  // Configure Android status bar — dark icons on light background
+  useEffect(() => {
+    async function configureStatusBar() {
+      try {
+        const { StatusBar, Style } = await import("@capacitor/status-bar");
+        await StatusBar.setStyle({ style: Style.Light }); // Dark icons
+        await StatusBar.setBackgroundColor({ color: "#ecfdf5" }); // Emerald-50
+        await StatusBar.setOverlaysWebView({ overlay: false });
+      } catch {
+        // Not in native app — use meta tag fallback
+        let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
+        if (!meta) {
+          meta = document.createElement("meta");
+          meta.name = "theme-color";
+          document.head.appendChild(meta);
+        }
+        meta.content = "#ecfdf5";
+      }
+    }
+    void configureStatusBar();
+  }, []);
 
   const switchToChat = useCallback((sessionId?: string) => {
     if (sessionId) {

@@ -65,7 +65,7 @@ export async function POST(request: Request): Promise<Response> {
     });
 
     const systemPrompt = body.systemPrompt ??
-      "You are Nova, a friendly AI wellness coach. Give brief, helpful health and wellness advice. Keep responses under 3 sentences.";
+      "Jesteś Nova, przyjazny trener zdrowia AI. Odpowiadaj po polsku. Dawaj krótkie, pomocne porady zdrowotne. Odpowiedzi max 3 zdania. If the user speaks English, respond in English.";
 
     const promptName = `voice-${Date.now()}`;
     const textEncoder = new TextEncoder();
