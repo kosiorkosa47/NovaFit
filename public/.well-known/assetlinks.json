@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.novafit.app",
+      "sha256_cert_fingerprints": [
+        "A0:DB:11:54:C8:32:19:FD:77:B2:3D:BD:B2:99:A8:DE:16:64:A1:74:EE:C1:EA:59:D2:2F:07:60:70:22:25:8B"
+      ]
+    }
+  }
+]

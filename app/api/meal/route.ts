@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
+import { requireAuth } from "@/lib/auth/helpers";
 
 export const runtime = "nodejs";
 
@@ -34,10 +35,13 @@ export interface FoodItem {
  * Uses Nova 2 Lite multimodal to analyze food in the photo.
  */
 export async function POST(request: Request): Promise<Response> {
+  const authResult = await requireAuth();
+  if (!authResult.authorized) return authResult.response;
+
   try {
-    // Rate limit: 20 requests per minute per IP
+    // Rate limit: 20 requests per minute per userId:IP
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-    const rl = checkRateLimit(ip, 20, 60_000);
+    const rl = checkRateLimit(`${authResult.userId}:${ip}`, 20, 60_000);
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: "Too many requests. Please wait a moment." },

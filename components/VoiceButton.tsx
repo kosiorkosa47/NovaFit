@@ -2,6 +2,7 @@
 
 import { Mic, MicOff, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,7 @@ interface VoiceResponse {
   error?: string;
 }
 
-const SILENCE_TIMEOUT_MS = 2000;
+const SILENCE_TIMEOUT_MS = 2500;
 const MAX_RECORDING_MS = 15000;
 
 export function VoiceButton({ onTranscript, size = "default", disabled = false }: VoiceButtonProps): React.ReactElement {
@@ -38,6 +39,18 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
   const sttResultRef = useRef<string | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const transcriptSentRef = useRef(false);
+
+  // FIX: Always use latest onTranscript via ref — prevents stale closure bug
+  const onTranscriptRef = useRef(onTranscript);
+  useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
+
+  /** Safely call onTranscript with latest ref — single entry point */
+  const emitTranscript = useCallback((text: string) => {
+    console.log("[voice] emitTranscript:", text, "alreadySent:", transcriptSentRef.current);
+    if (!text.trim() || transcriptSentRef.current) return;
+    transcriptSentRef.current = true;
+    onTranscriptRef.current(text);
+  }, []);
 
   const clearTimers = useCallback(() => {
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
@@ -82,10 +95,12 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
   const sendToNovaSonic = useCallback(async (audioBlob: Blob) => {
     setIsProcessing(true);
     try {
+      console.log("[voice] sendToNovaSonic: blob size=", audioBlob.size);
       const arrayBuffer = await audioBlob.arrayBuffer();
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       const decoded = await audioCtx.decodeAudioData(arrayBuffer);
       const channelData = decoded.getChannelData(0);
+      console.log("[voice] Decoded PCM samples:", channelData.length, "duration:", (channelData.length / 16000).toFixed(1), "s");
 
       const pcmBuffer = new ArrayBuffer(channelData.length * 2);
       const pcmView = new DataView(pcmBuffer);
@@ -95,9 +110,14 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       }
       await audioCtx.close();
 
-      const pcmBase64 = btoa(
-        String.fromCharCode(...new Uint8Array(pcmBuffer))
-      );
+      // Convert to base64 in chunks (spread operator crashes on large arrays)
+      const bytes = new Uint8Array(pcmBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 8192) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 8192)));
+      }
+      const pcmBase64 = btoa(binary);
+      console.log("[voice] PCM base64 length:", pcmBase64.length);
 
       const response = await fetch("/api/voice", {
         method: "POST",
@@ -105,44 +125,55 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         body: JSON.stringify({ audioBase64: pcmBase64, sampleRate: 16000 }),
       });
 
+      console.log("[voice] API response status:", response.status);
       const result = (await response.json()) as VoiceResponse;
+      console.log("[voice] Nova Sonic result:", JSON.stringify({ success: result.success, transcript: result.transcript?.slice(0, 80), text: result.text?.slice(0, 80), error: result.error, hasAudio: !!result.audioBase64 }));
 
       if (result.success) {
         if (result.audioBase64) {
           void playAudioResponse(result.audioBase64, result.sampleRate);
         }
         const text = result.transcript || result.text;
-        if (text && !transcriptSentRef.current) {
-          transcriptSentRef.current = true;
-          onTranscript(text);
-        }
+        if (text) emitTranscript(text);
       } else {
         // Nova Sonic failed — use browser STT result if we have one
-        if (sttResultRef.current && !transcriptSentRef.current) {
-          transcriptSentRef.current = true;
-          onTranscript(sttResultRef.current);
+        console.log("[voice] Nova Sonic failed, browser STT result:", sttResultRef.current);
+        if (sttResultRef.current) {
+          emitTranscript(sttResultRef.current);
+        } else {
+          toast.error("Could not understand audio. Try again or type.");
         }
       }
-    } catch {
+    } catch (err) {
       // Error — use browser STT result if available
-      if (sttResultRef.current && !transcriptSentRef.current) {
-        transcriptSentRef.current = true;
-        onTranscript(sttResultRef.current);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[voice] sendToNovaSonic error:", msg);
+      if (sttResultRef.current) {
+        emitTranscript(sttResultRef.current);
+      } else {
+        toast.error("Voice processing failed. Try again or type.");
       }
     } finally {
       setIsProcessing(false);
     }
-  }, [onTranscript, playAudioResponse]);
+  }, [emitTranscript, playAudioResponse]);
+
+  // Keep sendToNovaSonic ref fresh for mediaRecorder.onstop closure
+  const sendToNovaSonicRef = useRef(sendToNovaSonic);
+  useEffect(() => { sendToNovaSonicRef.current = sendToNovaSonic; }, [sendToNovaSonic]);
 
   const stopRecording = useCallback(() => {
     clearTimers();
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }
-    // Also stop browser STT
     try { recognitionRef.current?.stop(); } catch { /* ignore */ }
     setIsListening(false);
   }, [clearTimers]);
+
+  // Keep stopRecording ref fresh for silence detection closure
+  const stopRecordingRef = useRef(stopRecording);
+  useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
   const startRecording = useCallback(async () => {
     // Reset state for this recording session
@@ -162,10 +193,10 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       chunksRef.current = [];
 
       // --- Start browser SpeechRecognition in parallel ---
-      // This captures text immediately so we don't need a second recording attempt
       const Ctor = typeof window !== "undefined"
         ? window.SpeechRecognition ?? window.webkitSpeechRecognition
         : undefined;
+      console.log("[voice] SpeechRecognition available:", !!Ctor);
       if (Ctor) {
         try {
           const recognition = new Ctor();
@@ -174,17 +205,15 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
           recognition.interimResults = false;
           recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
             const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+            console.log("[voice] Browser STT result:", transcript);
             if (transcript) {
               sttResultRef.current = transcript;
-              // If Nova Sonic hasn't responded yet, send transcript immediately
-              if (!transcriptSentRef.current) {
-                transcriptSentRef.current = true;
-                onTranscript(transcript);
-              }
+              // Send immediately via ref (always latest callback)
+              emitTranscript(transcript);
             }
           };
-          recognition.onend = () => { /* no-op — MediaRecorder handles isListening state */ };
-          recognition.onerror = () => { /* ignore — Nova Sonic is backup */ };
+          recognition.onend = () => { /* no-op */ };
+          recognition.onerror = (e: { error?: string }) => { console.log("[voice] STT error:", e.error); };
           recognitionRef.current = recognition;
           recognition.start();
         } catch { /* SpeechRecognition not available */ }
@@ -214,8 +243,10 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         stream.getTracks().forEach((t) => t.stop());
         audioCtx.close().catch(() => {});
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        console.log("[voice] Recording stopped, blob size:", blob.size, "chunks:", chunksRef.current.length);
         if (blob.size > 0) {
-          void sendToNovaSonic(blob);
+          // Use ref to always get latest sendToNovaSonic
+          void sendToNovaSonicRef.current(blob);
         }
       };
 
@@ -238,7 +269,7 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         if (avg < SILENCE_THRESHOLD) {
           silentFrames++;
           if (silentFrames >= FRAMES_FOR_SILENCE) {
-            stopRecording();
+            stopRecordingRef.current();
           }
         } else {
           silentFrames = 0;
@@ -246,7 +277,7 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       }, 100);
 
       maxTimerRef.current = setTimeout(() => {
-        stopRecording();
+        stopRecordingRef.current();
       }, MAX_RECORDING_MS);
 
     } catch {
@@ -261,14 +292,16 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         recognition.interimResults = false;
         recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
           const transcript = event.results?.[0]?.[0]?.transcript?.trim();
-          if (transcript) onTranscript(transcript);
+          if (transcript) emitTranscript(transcript);
         };
         recognition.onend = () => setIsListening(false);
-        recognition.onerror = () => setIsListening(false);
-        try { recognition.start(); setIsListening(true); } catch { /* ignore */ }
+        recognition.onerror = () => { setIsListening(false); toast.error("Microphone not available."); };
+        try { recognition.start(); setIsListening(true); } catch { toast.error("Microphone not available."); }
+      } else {
+        toast.error("Microphone not available on this device.");
       }
     }
-  }, [sendToNovaSonic, onTranscript, stopRecording, clearTimers]);
+  }, [emitTranscript, clearTimers]);
 
   const toggleListening = useCallback(() => {
     if (disabled || isProcessing) return;

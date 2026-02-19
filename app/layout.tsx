@@ -3,6 +3,8 @@ import { Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 
 import { ServiceWorkerRegistrar } from "@/components/ServiceWorkerRegistrar";
+import { SessionProvider } from "@/components/auth/SessionProvider";
+import { DeepLinkHandler } from "@/components/DeepLinkHandler";
 import "@/app/globals.css";
 
 const font = Plus_Jakarta_Sans({
@@ -49,7 +51,10 @@ export default function RootLayout({
         <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192.png" />
       </head>
       <body className={`${font.variable} bg-background font-sans text-foreground antialiased`}>
-        {children}
+        <SessionProvider>
+          {children}
+        </SessionProvider>
+        <DeepLinkHandler />
         <Toaster richColors position="top-center" />
         <ServiceWorkerRegistrar />
       </body>

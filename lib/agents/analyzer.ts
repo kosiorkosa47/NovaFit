@@ -57,7 +57,9 @@ export interface AnalyzerInput {
   history: ChatMessage[];
   adaptationNotes: string[];
   userFacts: string[];
+  userContextStr?: string;
   sessionId: string;
+  imageData?: { bytes: Uint8Array; format: "jpeg" | "png" | "webp" | "gif" };
 }
 
 export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; parsed: AnalyzerResult }> {
@@ -65,6 +67,7 @@ export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; 
 
   const userPrompt = [
     `User message: ${input.message}`,
+    input.imageData ? "[The user also attached a photo. Describe what you see and incorporate it into your health analysis.]" : "",
     input.feedback ? `User feedback on previous plan: ${input.feedback}` : "",
     `\nWearable data:\n${formatWearableForPrompt(input.wearable)}`,
     `\nRecent conversation:\n${historyToPrompt(input.history)}`,
@@ -73,7 +76,8 @@ export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; 
       : "",
     input.userFacts.length
       ? `\nKnown user facts:\n- ${input.userFacts.join("\n- ")}`
-      : ""
+      : "",
+    input.userContextStr ? `\nUser context:\n${input.userContextStr}` : ""
   ]
     .filter(Boolean)
     .join("\n");
@@ -84,7 +88,8 @@ export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; 
       userPrompt,
       history: input.history,
       maxTokens: 400,
-      temperature: 0.2
+      temperature: 0.2,
+      imageData: input.imageData,
     });
 
     const parsed = parseAnalyzerResult(result.text);

@@ -15,7 +15,8 @@ import type {
   MonitorResult,
   OrchestratorInput,
   OrchestratorOutput,
-  PlanRecommendation
+  PlanRecommendation,
+  UserContext
 } from "@/lib/orchestrator/types";
 import {
   addAdaptationNote,
@@ -32,6 +33,25 @@ import { logOrchestrator } from "@/lib/utils/logging";
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function formatUserContext(ctx?: UserContext): string {
+  if (!ctx) return "";
+  const parts: string[] = [];
+  if (ctx.name) parts.push(`User's name: ${ctx.name}`);
+  if (ctx.timeOfDay) parts.push(`Current time of day: ${ctx.timeOfDay}`);
+  if (ctx.dayOfWeek) parts.push(`Day: ${ctx.dayOfWeek}`);
+  if (ctx.locale) parts.push(`User's language/locale: ${ctx.locale}`);
+  if (ctx.goals) {
+    const g = ctx.goals;
+    const goalParts: string[] = [];
+    if (g.calories) goalParts.push(`${g.calories} kcal/day`);
+    if (g.steps) goalParts.push(`${g.steps} steps/day`);
+    if (g.sleep) goalParts.push(`${g.sleep}h sleep`);
+    if (g.water) goalParts.push(`${g.water}ml water`);
+    if (goalParts.length) parts.push(`Daily goals: ${goalParts.join(", ")}`);
+  }
+  return parts.length ? parts.join("\n") : "";
 }
 
 function buildAgentResponseText(
@@ -58,10 +78,26 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   const adaptationNotes = getAdaptationNotes(input.sessionId);
   const userFacts = getUserFacts(input.sessionId);
 
-  // Step 1: Collect wearable context
+  // Step 1: Collect wearable context (prefer real data from client)
   input.onEvent?.({ type: "status", message: "Checking your recent activity..." });
-  const wearable = await getWearableSnapshot(input.sessionId);
-  logOrchestrator(`Wearable: steps=${wearable.steps}, sleep=${wearable.sleepHours}h, stress=${wearable.stressLevel}`, input.sessionId);
+  let wearable = await getWearableSnapshot(input.sessionId);
+
+  // Override mock with real sensor data from client if available
+  if (input.userContext?.healthData && input.userContext.healthData.source !== "mock") {
+    const hd = input.userContext.healthData;
+    wearable = {
+      steps: hd.steps,
+      averageHeartRate: hd.heartRate ?? wearable.averageHeartRate,
+      restingHeartRate: Math.round((hd.heartRate ?? wearable.averageHeartRate) * 0.75),
+      sleepHours: hd.sleep,
+      stressLevel: hd.stress < 35 ? "low" : hd.stress < 65 ? "moderate" : "high",
+      capturedAt: new Date().toISOString(),
+    };
+  }
+  logOrchestrator(`Wearable: steps=${wearable.steps}, sleep=${wearable.sleepHours}h, stress=${wearable.stressLevel} (source: ${input.userContext?.healthData?.source ?? "mock"})`, input.sessionId);
+
+  // Build user context string for prompts
+  const userContextStr = formatUserContext(input.userContext);
 
   // Try the full Nova pipeline; fall back to template-based responses on quota errors
   let analyzer: AnalyzerResult;
@@ -82,7 +118,9 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       history,
       adaptationNotes,
       userFacts,
-      sessionId: input.sessionId
+      userContextStr,
+      sessionId: input.sessionId,
+      imageData: input.image,
     });
     analyzer = analyzerResult.parsed;
     analyzerRaw = analyzerResult.raw;
@@ -106,6 +144,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       history,
       adaptationNotes,
       userFacts,
+      userContextStr,
       sessionId: input.sessionId
     });
     plan = plannerResult.parsed;
@@ -127,6 +166,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       analyzer,
       plan,
       history,
+      userContextStr,
       sessionId: input.sessionId
     });
     monitor = monitorResult.parsed;

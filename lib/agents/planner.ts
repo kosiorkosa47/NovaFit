@@ -60,6 +60,7 @@ export interface PlannerInput {
   history: ChatMessage[];
   adaptationNotes: string[];
   userFacts: string[];
+  userContextStr?: string;
   sessionId: string;
 }
 
@@ -77,7 +78,8 @@ export async function runPlanner(input: PlannerInput): Promise<{ raw: string; pa
       : "",
     input.userFacts.length
       ? `\nKnown user preferences/restrictions:\n- ${input.userFacts.join("\n- ")}`
-      : ""
+      : "",
+    input.userContextStr ? `\nUser context:\n${input.userContextStr}` : ""
   ]
     .filter(Boolean)
     .join("\n");

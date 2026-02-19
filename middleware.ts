@@ -1,9 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/lib/auth/auth";
 
-export function middleware(request: NextRequest) {
-  const response = NextResponse.next();
+const PUBLIC_PATHS = ["/auth/", "/api/nextauth/", "/api/register", "/api/migrate-local-data"];
 
-  // --- Security headers ---
+function isPublic(pathname: string): boolean {
+  return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+}
+
+function addSecurityHeaders(response: NextResponse): void {
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-XSS-Protection", "1; mode=block");
@@ -15,30 +19,51 @@ export function middleware(request: NextRequest) {
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
+      "img-src 'self' data: blob: https://lh3.googleusercontent.com",
       "font-src 'self' data:",
       "connect-src 'self' https://*.amazonaws.com https://api.telegram.org",
       "media-src 'self' blob:",
       "frame-ancestors 'none'",
     ].join("; ")
   );
+}
 
-  // --- Block common scanners / path traversal ---
-  const path = request.nextUrl.pathname;
+export default auth((request) => {
+  const { pathname } = request.nextUrl;
+
+  // Block common scanners / path traversal
   if (
-    path.includes("..") ||
-    path.includes("\\") ||
-    /\.(php|asp|aspx|jsp|cgi|env)$/i.test(path)
+    pathname.includes("..") ||
+    pathname.includes("\\") ||
+    /\.(php|asp|aspx|jsp|cgi|env)$/i.test(pathname)
   ) {
     return new NextResponse(null, { status: 404 });
   }
 
+  const session = request.auth;
+
+  // Authenticated users trying to access auth pages → redirect to home
+  if (session && isPublic(pathname) && pathname.startsWith("/auth/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    return NextResponse.redirect(url);
+  }
+
+  // Unauthenticated users on protected routes → redirect to login
+  if (!session && !isPublic(pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/login";
+    url.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(url);
+  }
+
+  const response = NextResponse.next();
+  addSecurityHeaders(response);
   return response;
-}
+}) as (request: NextRequest) => NextResponse;
 
 export const config = {
   matcher: [
-    // Match all routes except static files and _next internals
-    "/((?!_next/static|_next/image|favicon.ico|icons/|manifest.json|sw.js).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icons/|manifest.json|sw.js|api/nextauth|.well-known).*)",
   ],
 };

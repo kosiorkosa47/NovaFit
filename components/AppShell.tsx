@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { useSession, signOut } from "next-auth/react";
 
 import { BottomTabBar, type TabId } from "@/components/BottomTabBar";
 import { ChatInterface } from "@/components/ChatInterface";
@@ -10,12 +11,58 @@ import { SettingsPage } from "@/components/SettingsPage";
 import { ProfilePage } from "@/components/ProfilePage";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-const SESSION_STORAGE_KEY = "nova-health-session-id";
+const MIGRATION_FLAG = "nova-health-data-migrated";
 
 export function AppShell() {
+  const { data: session } = useSession();
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [voiceOutput, setVoiceOutput] = useState(true);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>();
+
+  // Populate localStorage profile from Google session data (first login)
+  useEffect(() => {
+    if (!session?.user) return;
+    const existing = localStorage.getItem("nova-health-profile");
+    if (existing) return; // Already has a profile
+
+    const { name, image } = session.user;
+    if (name || image) {
+      localStorage.setItem("nova-health-profile", JSON.stringify({
+        name: name ?? "",
+        photo: image ?? undefined,
+        createdAt: new Date().toISOString(),
+      }));
+      // Notify ProfilePage to re-read
+      window.dispatchEvent(new Event("storage"));
+    }
+  }, [session?.user]);
+
+  // Migrate localStorage data to DB on first authenticated visit
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    if (localStorage.getItem(MIGRATION_FLAG)) return;
+
+    const profile = localStorage.getItem("nova-health-profile");
+    const goals = localStorage.getItem("nova-health-goals");
+
+    if (!profile && !goals) {
+      localStorage.setItem(MIGRATION_FLAG, "1");
+      return;
+    }
+
+    void fetch("/api/migrate-local-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: profile ? JSON.parse(profile) : undefined,
+        goals: goals ? JSON.parse(goals) : undefined,
+      }),
+    }).then(() => {
+      localStorage.setItem(MIGRATION_FLAG, "1");
+    }).catch(() => {
+      // Silently fail — will retry next visit
+    });
+  }, [session?.user?.id]);
 
   // Configure Android status bar — adapt to theme
   useEffect(() => {
@@ -88,7 +135,22 @@ export function AppShell() {
             </span>
           </div>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          {session?.user && (
+            <button
+              onClick={() => void signOut({ callbackUrl: "/auth/login" })}
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Sign out"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Content area */}

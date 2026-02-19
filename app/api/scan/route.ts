@@ -8,6 +8,7 @@ import {
 } from "@/lib/integrations/ingredients-db";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
+import { requireAuth } from "@/lib/auth/helpers";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_TEXT_LENGTH = 5000;
@@ -114,10 +115,13 @@ function generateSummary(
  * For now: text-based analysis. Image OCR will use Nova multimodal when quota available.
  */
 export async function POST(request: Request): Promise<Response> {
+  const authResult = await requireAuth();
+  if (!authResult.authorized) return authResult.response;
+
   try {
-    // Rate limit: 30 requests per minute per IP
+    // Rate limit: 30 requests per minute per userId:IP
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-    const rl = checkRateLimit(ip, 30, 60_000);
+    const rl = checkRateLimit(`${authResult.userId}:${ip}`, 30, 60_000);
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: "Too many requests. Please wait a moment." },

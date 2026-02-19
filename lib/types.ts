@@ -10,6 +10,7 @@ export type {
   PlanRecommendation,
   MonitorResult,
   AgentStepResult,
+  UserContext,
   AgentApiRequest,
   AgentApiResponse,
   OrchestratorInput,

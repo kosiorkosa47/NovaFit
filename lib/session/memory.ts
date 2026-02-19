@@ -5,6 +5,7 @@ const MEMORY_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
 const MAX_ADAPTATION_NOTES = 10;
 const MAX_USER_FACTS = 20;
 
+// In-memory cache (fast path / fallback)
 function getGlobalMemoryStore(): Map<string, SessionMemory> {
   const globalScope = globalThis as typeof globalThis & {
     __novaSessionMemory?: Map<string, SessionMemory>;

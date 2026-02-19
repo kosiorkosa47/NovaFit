@@ -3,13 +3,16 @@ import { z } from "zod";
 
 import { assertBedrockEnv } from "@/lib/bedrock/client";
 import { orchestrateAgents } from "@/lib/orchestrator";
-import type { SseEvent } from "@/lib/orchestrator/types";
+import type { SseEvent, ImageAttachment, UserContext } from "@/lib/orchestrator/types";
 import { MAX_FEEDBACK_LENGTH, MAX_MESSAGE_LENGTH, sanitizeMessageInput, sanitizeFeedbackInput } from "@/lib/utils/sanitize";
 import { formatSseEvent } from "@/lib/utils/sse";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import { isValidSessionId } from "@/lib/utils/sanitize";
+import { requireAuth } from "@/lib/auth/helpers";
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 
 export const runtime = "nodejs";
 
@@ -38,10 +41,13 @@ function getSafeErrorMessage(error: unknown): string {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const authResult = await requireAuth();
+  if (!authResult.authorized) return authResult.response;
+
   try {
-    // Rate limit: 20 requests per minute per IP
+    // Rate limit: 20 requests per minute per userId:IP
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-    const rl = checkRateLimit(ip, 20, 60_000);
+    const rl = checkRateLimit(`${authResult.userId}:${ip}`, 20, 60_000);
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: "Too many requests. Please wait a moment." },
@@ -49,8 +55,49 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const body = await request.json().catch(() => null);
-    const parsed = requestSchema.safeParse(body);
+    // Parse request — supports both JSON and FormData (multipart with image)
+    let rawSessionId: string | undefined;
+    let rawMessage: string | undefined;
+    let rawFeedback: string | undefined;
+    let rawMode: string | undefined;
+    let image: ImageAttachment | undefined;
+    let userContext: UserContext | undefined;
+
+    const contentType = request.headers.get("content-type") ?? "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      rawSessionId = formData.get("sessionId") as string | null ?? undefined;
+      rawMessage = formData.get("message") as string | null ?? undefined;
+      rawFeedback = formData.get("feedback") as string | null ?? undefined;
+      rawMode = formData.get("mode") as string | null ?? undefined;
+
+      const rawContext = formData.get("userContext") as string | null;
+      if (rawContext) try { userContext = JSON.parse(rawContext) as UserContext; } catch { /* ignore */ }
+
+      const imageFile = formData.get("image") as File | null;
+      if (imageFile && imageFile.type.startsWith("image/") && imageFile.size <= MAX_IMAGE_SIZE) {
+        const buffer = await imageFile.arrayBuffer();
+        const format = (imageFile.type.replace("image/", "") || "jpeg") as "jpeg" | "png" | "webp" | "gif";
+        image = { bytes: new Uint8Array(buffer), format };
+      }
+    } else {
+      const body = await request.json().catch(() => null);
+      if (body) {
+        rawSessionId = body.sessionId;
+        rawMessage = body.message;
+        rawFeedback = body.feedback;
+        rawMode = body.mode;
+        userContext = body.userContext as UserContext | undefined;
+      }
+    }
+
+    const parsed = requestSchema.safeParse({
+      sessionId: rawSessionId,
+      message: rawMessage,
+      feedback: rawFeedback,
+      mode: rawMode,
+    });
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -79,7 +126,7 @@ export async function POST(request: Request): Promise<Response> {
 
     assertBedrockEnv();
 
-    log({ level: "info", agent: "api", message: `POST /api/agent session=${sessionId.slice(0, 8)} mode=${parsed.data.mode ?? "stream"}` });
+    log({ level: "info", agent: "api", message: `POST /api/agent session=${sessionId.slice(0, 8)} mode=${parsed.data.mode ?? "stream"} image=${image ? "yes" : "no"}` });
 
     const forceJson = parsed.data.mode === "json";
 
@@ -87,7 +134,9 @@ export async function POST(request: Request): Promise<Response> {
       const result = await orchestrateAgents({
         sessionId,
         message,
-        feedback
+        feedback,
+        image,
+        userContext,
       });
 
       return NextResponse.json(result.apiResponse, { status: 200 });
@@ -115,6 +164,8 @@ export async function POST(request: Request): Promise<Response> {
               sessionId,
               message,
               feedback,
+              image,
+              userContext,
               onEvent: emit
             });
 

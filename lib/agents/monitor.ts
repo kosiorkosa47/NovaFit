@@ -44,6 +44,7 @@ export interface MonitorInput {
   analyzer: AnalyzerResult;
   plan: PlanRecommendation;
   history: ChatMessage[];
+  userContextStr?: string;
   sessionId: string;
 }
 
@@ -60,6 +61,7 @@ export async function runMonitor(input: MonitorInput): Promise<{ raw: string; pa
     `Diet highlights: ${input.plan.diet.slice(0, 2).join("; ")}`,
     `Exercise: ${input.plan.exercise.slice(0, 2).join("; ")}`,
     `\nRisk flags: ${input.analyzer.riskFlags.join(" | ")}`,
+    input.userContextStr ? `\nUser context:\n${input.userContextStr}` : "",
     "\nCompose a warm, natural response. End with one brief feedback question."
   ]
     .filter(Boolean)

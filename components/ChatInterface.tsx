@@ -10,13 +10,14 @@ import { NutritionScanCard } from "@/components/NutritionScanCard";
 import { MealAnalysisCard } from "@/components/MealAnalysisCard";
 import { VoiceButton } from "@/components/VoiceButton";
 import { DEFAULT_GREETING } from "@/lib/constants";
-import type { AgentApiResponse, AgentApiRequest, SseEvent, PlanRecommendation } from "@/lib/types";
+import type { AgentApiResponse, AgentApiRequest, SseEvent, PlanRecommendation, UserContext } from "@/lib/types";
 import type { WearableSnapshot } from "@/lib/types";
 import type { ScanResponse } from "@/app/api/scan/route";
 import type { MealAnalysis } from "@/app/api/meal/route";
 import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
 import { saveHistoryEntry } from "@/components/HistoryPage";
 import { t, getLang, type Lang } from "@/lib/i18n";
+import { getHealthData } from "@/lib/sensors/health-bridge";
 
 /** Safe unique ID — fallback for HTTP (no secure context) */
 function uid(): string {
@@ -216,11 +217,14 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const [cameraMode, setCameraMode] = useState<"label" | "meal" | null>(null);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const [lang, setLangState] = useState<Lang>("en");
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   // Initialize session + lang
   useEffect(() => {
@@ -407,8 +411,14 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
 
   const sendMessage = useCallback(async (overrideMessage?: string) => {
     const messageToSend = overrideMessage ?? input;
-    const sanitizedMessage = sanitizeMessageInput(messageToSend);
-    if (!sanitizedMessage || !sessionId || isStreaming) return;
+    console.log("[chat] sendMessage called, override:", overrideMessage, "input:", input, "sessionId:", sessionId, "isStreaming:", isStreaming);
+    // If there's a pending image but no text, use a default prompt
+    const fallbackMessage = pendingImage && !messageToSend.trim() ? "What can you tell me about this photo?" : messageToSend;
+    const sanitizedMessage = sanitizeMessageInput(fallbackMessage);
+    if (!sanitizedMessage || !sessionId || isStreaming) {
+      console.log("[chat] sendMessage BLOCKED — sanitized:", sanitizedMessage, "sessionId:", sessionId, "isStreaming:", isStreaming);
+      return;
+    }
 
     if (!hasStarted) {
       setMessages([{
@@ -468,26 +478,90 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
       return;
     }
 
-    addUserMessage(sanitizedMessage);
+    // Capture pending image before clearing state
+    const imageFile = pendingImage;
+    const imagePreviewUrl = pendingImagePreview;
+
+    // Show user message with optional image preview
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        role: "user",
+        content: sanitizedMessage,
+        timestamp: new Date().toISOString(),
+        imagePreview: imagePreviewUrl ?? undefined,
+      }
+    ]);
+    resetInactivityTimer();
+
     setInput("");
-    setStatusLabel("Nova is analyzing your request...");
+    setPendingImage(null);
+    setPendingImagePreview(null);
+    setStatusLabel(imageFile ? "Nova is analyzing your photo..." : "Nova is analyzing your request...");
     setIsStreaming(true);
 
     // Blur textarea on mobile to hide keyboard during processing
     textareaRef.current?.blur();
 
-    const payload: AgentApiRequest = {
-      sessionId,
-      message: sanitizedMessage,
-      mode: "stream"
-    };
-
     try {
-      const response = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify(payload)
-      });
+      // Collect user context (profile + goals + real sensor data)
+      let userContext: UserContext | undefined;
+      try {
+        const now = new Date();
+        const hour = now.getHours();
+        const timeOfDay = hour < 6 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
+        const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+        const profile = JSON.parse(localStorage.getItem("nova-health-profile") || "{}") as Record<string, unknown>;
+        const goals = JSON.parse(localStorage.getItem("nova-health-goals") || "{}") as Record<string, unknown>;
+
+        let healthData: UserContext["healthData"] | undefined;
+        try {
+          const hd = await getHealthData();
+          healthData = { steps: hd.steps, heartRate: hd.heartRate, calories: hd.calories, sleep: hd.sleep, stress: hd.stress, source: hd.source };
+        } catch { /* sensor unavailable */ }
+
+        userContext = {
+          name: typeof profile.name === "string" ? profile.name : undefined,
+          goals: Object.keys(goals).length > 0 ? goals as UserContext["goals"] : undefined,
+          healthData,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          locale: navigator.language,
+          timeOfDay,
+          dayOfWeek: days[now.getDay()],
+        };
+      } catch { /* ignore context errors */ }
+
+      let response: Response;
+
+      if (imageFile) {
+        // Send as FormData (multipart) with image
+        const formData = new FormData();
+        formData.append("sessionId", sessionId);
+        formData.append("message", sanitizedMessage);
+        formData.append("mode", "stream");
+        formData.append("image", imageFile);
+        if (userContext) formData.append("userContext", JSON.stringify(userContext));
+        response = await fetch("/api/agent", {
+          method: "POST",
+          headers: { Accept: "text/event-stream" },
+          body: formData,
+        });
+      } else {
+        // Send as JSON (text only)
+        const payload: AgentApiRequest = {
+          sessionId,
+          message: sanitizedMessage,
+          mode: "stream",
+          userContext,
+        };
+        response = await fetch("/api/agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          body: JSON.stringify(payload)
+        });
+      }
 
       if (!response.ok) {
         const errorJson = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -541,7 +615,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
         return current;
       });
     }
-  }, [addAssistantMessage, addUserMessage, handleStreamResponse, hasStarted, input, isStreaming, sessionId]);
+  }, [addAssistantMessage, handleStreamResponse, hasStarted, input, isStreaming, sessionId, pendingImage, pendingImagePreview, resetInactivityTimer]);
 
   const handleScanUpload = useCallback(async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -708,12 +782,35 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     [handleScanUpload, handleMealUpload, cameraMode]
   );
 
-  const handleVoiceTranscript = useCallback((text: string) => {
-    setInput(text);
-    void sendMessage(text);
-  }, [sendMessage]);
+  const handleImageAttach = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file && file.type.startsWith("image/")) {
+        setPendingImage(file);
+        setPendingImagePreview(URL.createObjectURL(file));
+      }
+      e.target.value = "";
+    },
+    []
+  );
 
-  const canSend = useMemo(() => Boolean(input.trim()) && !isStreaming, [input, isStreaming]);
+  const clearPendingImage = useCallback(() => {
+    setPendingImage(null);
+    setPendingImagePreview(null);
+  }, []);
+
+  // Keep sendMessage ref fresh so voice callback always uses latest version
+  const sendMessageRef = useRef(sendMessage);
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    console.log("[chat] handleVoiceTranscript called:", text, "sessionId:", sessionId, "isStreaming:", isStreaming);
+    setInput(text);
+    // Use ref to avoid stale closure — sendMessage depends on sessionId/isStreaming
+    void sendMessageRef.current(text);
+  }, [sessionId, isStreaming]);
+
+  const canSend = useMemo(() => (Boolean(input.trim()) || Boolean(pendingImage)) && !isStreaming, [input, isStreaming, pendingImage]);
 
   const handleInputKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -816,6 +913,26 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
 
       {/* Input bar: pinned at bottom */}
       <div className="shrink-0 border-t-[1.5px] border-white/50 bg-gradient-to-b from-white/65 to-white/45 px-3 pb-2 pt-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.7),0_-8px_32px_-4px_rgba(16,185,129,0.06)] backdrop-blur-[50px] backdrop-saturate-[250%] backdrop-brightness-[1.15] dark:border-emerald-800/20 dark:from-[rgba(16,185,129,0.10)] dark:to-[rgba(2,44,34,0.50)] dark:shadow-[inset_0_2px_0_rgba(255,255,255,0.08),0_-8px_32px_-4px_rgba(0,0,0,0.3)]">
+        {/* Pending image preview */}
+        {pendingImagePreview && (
+          <div className="mx-auto mb-2 flex max-w-2xl items-center gap-2">
+            <div className="relative">
+              <img
+                src={pendingImagePreview}
+                alt="Attached"
+                className="h-16 w-16 rounded-xl border border-white/30 object-cover shadow-sm"
+              />
+              <button
+                type="button"
+                onClick={clearPendingImage}
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm"
+              >
+                ✕
+              </button>
+            </div>
+            <span className="text-xs text-muted-foreground">Type a question about this photo</span>
+          </div>
+        )}
         <div className="mx-auto flex max-w-2xl items-end gap-1.5">
           <VoiceButton onTranscript={handleVoiceTranscript} disabled={isStreaming} />
 
@@ -865,6 +982,26 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                   <ScanBarcode className="h-4 w-4 text-amber-600" />
                   <span>{t("scan_label", lang)}</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setShowCameraMenu(false);
+                    if (isNative()) {
+                      const file = await takeNativePhoto();
+                      if (file) {
+                        setPendingImage(file);
+                        setPendingImagePreview(URL.createObjectURL(file));
+                        textareaRef.current?.focus();
+                      }
+                    } else {
+                      imageInputRef.current?.click();
+                    }
+                  }}
+                  className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
+                >
+                  <ImageIcon className="h-4 w-4 text-blue-600" />
+                  <span>Ask about photo</span>
+                </button>
               </div>
             )}
           </div>
@@ -873,6 +1010,13 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
             type="file"
             accept="image/*"
             onChange={handleFileInputChange}
+            className="hidden"
+          />
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageAttach}
             className="hidden"
           />
 

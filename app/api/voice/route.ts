@@ -6,6 +6,7 @@ import {
 import { NodeHttp2Handler } from "@smithy/node-http-handler";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
+import { requireAuth } from "@/lib/auth/helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -19,9 +20,12 @@ const MAX_AUDIO_SIZE = 2 * 1024 * 1024; // 2 MB
  * Returns: { text: string, audioBase64: string, transcript: string }
  */
 export async function POST(request: Request): Promise<Response> {
+  const authResult = await requireAuth();
+  if (!authResult.authorized) return authResult.response;
+
   try {
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-    const rl = checkRateLimit(ip, 15, 60_000);
+    const rl = checkRateLimit(`${authResult.userId}:${ip}`, 15, 60_000);
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: "Too many requests." },

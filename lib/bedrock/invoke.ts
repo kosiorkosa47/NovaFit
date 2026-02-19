@@ -2,7 +2,9 @@ import {
   ConverseCommand,
   type ConverseCommandInput,
   type ConverseCommandOutput,
-  type Message
+  type Message,
+  type ContentBlock,
+  type ImageFormat,
 } from "@aws-sdk/client-bedrock-runtime";
 
 import { getBedrockClient } from "@/lib/bedrock/client";
@@ -20,6 +22,7 @@ export interface InvokeOptions {
   history?: ChatMessage[];
   maxTokens?: number;
   temperature?: number;
+  imageData?: { bytes: Uint8Array; format: "jpeg" | "png" | "webp" | "gif" };
 }
 
 export interface InvokeResult {
@@ -57,6 +60,18 @@ async function invokeWithModel(modelId: string, options: InvokeOptions): Promise
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
+  // Build user content blocks — image first (if present), then text
+  const userContent: ContentBlock[] = [];
+  if (options.imageData) {
+    userContent.push({
+      image: {
+        format: options.imageData.format as ImageFormat,
+        source: { bytes: options.imageData.bytes },
+      },
+    });
+  }
+  userContent.push({ text: options.userPrompt });
+
   const input: ConverseCommandInput = {
     modelId,
     system: [{ text: options.systemPrompt }],
@@ -64,7 +79,7 @@ async function invokeWithModel(modelId: string, options: InvokeOptions): Promise
       ...buildHistoryMessages(options.history),
       {
         role: "user",
-        content: [{ text: options.userPrompt }]
+        content: userContent,
       }
     ],
     inferenceConfig: {
