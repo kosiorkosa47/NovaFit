@@ -43,6 +43,15 @@
   --destructive-foreground: 0 0% 95%;
 }
 
+/* Kill all transitions during theme switch to prevent GPU stutter */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
 @layer base {
   * {
     @apply border-border;

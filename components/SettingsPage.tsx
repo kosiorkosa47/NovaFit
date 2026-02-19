@@ -57,10 +57,18 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
 
   const toggleTheme = (checked: boolean) => {
     setDark(checked);
-    document.documentElement.classList.toggle("dark", checked);
+    // Kill all transitions/animations while theme flips — prevents GPU stutter
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.classList.toggle("dark", checked);
     localStorage.setItem("nova-theme", checked ? "dark" : "light");
-    // Update status bar for contrast
     window.dispatchEvent(new CustomEvent("novafit-theme-change", { detail: checked ? "dark" : "light" }));
+    // Re-enable transitions after repaint settles
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        root.classList.remove("theme-switching");
+      });
+    });
   };
 
   const handleClearSession = () => {
