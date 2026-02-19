@@ -83,11 +83,15 @@ export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; 
     .join("\n");
 
   try {
+    logAgentStart("Analyzer", input.sessionId); // log image info
+    if (input.imageData) {
+      console.log(`[Analyzer] Image data: ${input.imageData.format}, ${input.imageData.bytes.length} bytes`);
+    }
     const result = await invokeNovaLite({
       systemPrompt: ANALYZER_SYSTEM_PROMPT,
       userPrompt,
       history: input.history,
-      maxTokens: 400,
+      maxTokens: 600,
       temperature: 0.2,
       imageData: input.imageData,
     });

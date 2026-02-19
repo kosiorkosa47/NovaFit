@@ -76,10 +76,12 @@ export async function POST(request: Request): Promise<Response> {
       if (rawContext) try { userContext = JSON.parse(rawContext) as UserContext; } catch { /* ignore */ }
 
       const imageFile = formData.get("image") as File | null;
+      log({ level: "info", agent: "api", message: `FormData image: ${imageFile ? `${imageFile.name} (${imageFile.type}, ${(imageFile.size / 1024).toFixed(0)} KB)` : "none"}` });
       if (imageFile && imageFile.type.startsWith("image/") && imageFile.size <= MAX_IMAGE_SIZE) {
         const buffer = await imageFile.arrayBuffer();
         const format = (imageFile.type.replace("image/", "") || "jpeg") as "jpeg" | "png" | "webp" | "gif";
         image = { bytes: new Uint8Array(buffer), format };
+        log({ level: "info", agent: "api", message: `Image processed: ${format}, ${image.bytes.length} bytes` });
       }
     } else {
       const body = await request.json().catch(() => null);

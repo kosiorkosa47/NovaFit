@@ -35,11 +35,12 @@ function isNative(): boolean {
 /** Use Capacitor Camera plugin for native photo capture (camera + gallery picker) */
 async function takeNativePhoto(): Promise<File | null> {
   try {
+    console.log("[camera] takeNativePhoto: importing Capacitor Camera...");
     const { Camera, CameraResultType, CameraSource } = await import("@capacitor/camera");
     const photo = await Camera.getPhoto({
       quality: 75,
       allowEditing: false,
-      resultType: CameraResultType.DataUrl, // DataUrl avoids manual base64 → ArrayBuffer
+      resultType: CameraResultType.DataUrl,
       source: CameraSource.Prompt,
       width: 800,
       height: 800,
@@ -49,14 +50,19 @@ async function takeNativePhoto(): Promise<File | null> {
       promptLabelPicture: "Take Photo",
       promptLabelCancel: "Cancel",
     });
-    if (!photo.dataUrl) return null;
-    // Convert data URL to File via fetch — memory-efficient, no atob loop
+    if (!photo.dataUrl) {
+      console.log("[camera] No dataUrl returned from Camera.getPhoto");
+      return null;
+    }
+    console.log("[camera] Photo captured, format:", photo.format, "dataUrl length:", photo.dataUrl.length);
     const resp = await fetch(photo.dataUrl);
     const blob = await resp.blob();
     const mime = photo.format === "png" ? "image/png" : "image/jpeg";
-    return new File([blob], `photo.${photo.format}`, { type: mime });
-  } catch {
-    // User cancelled or camera not available
+    const file = new File([blob], `photo.${photo.format}`, { type: mime });
+    console.log("[camera] File created:", file.name, file.type, (file.size / 1024).toFixed(0), "KB");
+    return file;
+  } catch (err) {
+    console.warn("[camera] takeNativePhoto failed:", err);
     return null;
   }
 }
@@ -481,6 +487,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     // Capture pending image before clearing state
     const imageFile = pendingImage;
     const imagePreviewUrl = pendingImagePreview;
+    console.log("[chat] image state:", imageFile ? `${imageFile.name} (${imageFile.type}, ${(imageFile.size / 1024).toFixed(0)} KB)` : "none");
 
     // Show user message with optional image preview
     setMessages((prev) => [
@@ -537,6 +544,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
 
       if (imageFile) {
         // Send as FormData (multipart) with image
+        console.log("[chat] Sending image to /api/agent via FormData");
         const formData = new FormData();
         formData.append("sessionId", sessionId);
         formData.append("message", sanitizedMessage);
@@ -548,6 +556,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
           headers: { Accept: "text/event-stream" },
           body: formData,
         });
+        console.log("[chat] Image response status:", response.status);
       } else {
         // Send as JSON (text only)
         const payload: AgentApiRequest = {
@@ -785,6 +794,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const handleImageAttach = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      console.log("[chat] handleImageAttach:", file ? `${file.name} (${file.type}, ${(file.size / 1024).toFixed(0)} KB)` : "no file");
       if (file && file.type.startsWith("image/")) {
         setPendingImage(file);
         setPendingImagePreview(URL.createObjectURL(file));

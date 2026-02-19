@@ -1,4 +1,4 @@
-import { invokeNovaSonicOrFallback } from "@/lib/bedrock/invoke";
+import { invokeNovaLite } from "@/lib/bedrock/invoke";
 import type { AnalyzerResult, PlanRecommendation, MonitorResult } from "@/lib/orchestrator/types";
 import { MONITOR_SYSTEM_PROMPT } from "@/lib/orchestrator/prompts";
 import type { ChatMessage } from "@/lib/session/session.types";
@@ -68,7 +68,7 @@ export async function runMonitor(input: MonitorInput): Promise<{ raw: string; pa
     .join("\n");
 
   try {
-    const result = await invokeNovaSonicOrFallback({
+    const result = await invokeNovaLite({
       systemPrompt: MONITOR_SYSTEM_PROMPT,
       userPrompt,
       history: input.history,

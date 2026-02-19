@@ -35,6 +35,14 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Safe unique ID — works without HTTPS/secure context */
+function safeId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try { return crypto.randomUUID(); } catch { /* secure context required */ }
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 function formatUserContext(ctx?: UserContext): string {
   if (!ctx) return "";
   const parts: string[] = [];
@@ -109,21 +117,27 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   let usedFallback = false;
 
   try {
-    // Step 2: Analyzer Agent
+    // Step 2: Analyzer Agent + Nutritionix in parallel (saves 2-5s)
     input.onEvent?.({ type: "status", message: "Analyzing your current state..." });
-    const analyzerResult = await runAnalyzer({
-      message,
-      feedback,
-      wearable,
-      history,
-      adaptationNotes,
-      userFacts,
-      userContextStr,
-      sessionId: input.sessionId,
-      imageData: input.image,
-    });
+
+    const [analyzerResult, nutritionContext] = await Promise.all([
+      runAnalyzer({
+        message,
+        feedback,
+        wearable,
+        history,
+        adaptationNotes,
+        userFacts,
+        userContextStr,
+        sessionId: input.sessionId,
+        imageData: input.image,
+      }),
+      getNutritionContext(message),
+    ]);
     analyzer = analyzerResult.parsed;
     analyzerRaw = analyzerResult.raw;
+
+    logOrchestrator(`Image passed to analyzer: ${input.image ? `${input.image.format}, ${input.image.bytes.length} bytes` : "none"}`, input.sessionId);
 
     input.onEvent?.({
       type: "agent_update",
@@ -132,9 +146,8 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       payload: analyzer
     });
 
-    // Step 3: Planner Agent (with Nutritionix)
+    // Step 3: Planner Agent
     input.onEvent?.({ type: "status", message: "Building your personalized plan..." });
-    const nutritionContext = await getNutritionContext(message);
 
     const plannerResult = await runPlanner({
       message,
@@ -241,7 +254,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   }
 
   addMessageToMemory(input.sessionId, {
-    id: crypto.randomUUID(),
+    id: safeId(),
     role: "user",
     content: feedback ? `${message}\nFeedback: ${feedback}` : message,
     createdAt: nowIso()
@@ -250,7 +263,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   const composedReply = buildAgentResponseText(analyzer, plan, monitor);
 
   addMessageToMemory(input.sessionId, {
-    id: crypto.randomUUID(),
+    id: safeId(),
     role: "assistant",
     content: composedReply,
     createdAt: nowIso()
