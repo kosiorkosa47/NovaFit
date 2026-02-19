@@ -44,10 +44,12 @@ function parseAnalyzerResult(raw: string): AnalyzerResult {
 function historyToPrompt(messages: ChatMessage[]): string {
   if (!messages.length) return "No prior conversation in this session.";
 
-  return messages
+  const formatted = messages
     .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
     .join("\n")
-    .slice(0, 2000);
+    .slice(0, 3000);
+
+  return `${formatted}\n\nIMPORTANT: Any health facts the user stated in previous messages (sleep hours, exercise, how they feel) should be treated as still true unless they say otherwise.`;
 }
 
 export interface AnalyzerInput {
