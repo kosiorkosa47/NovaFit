@@ -20,15 +20,9 @@ interface VoiceResponse {
   error?: string;
 }
 
-const SILENCE_TIMEOUT_MS = 2000; // Auto-stop after 2s of silence
-const MAX_RECORDING_MS = 15000; // Max 15s recording
+const SILENCE_TIMEOUT_MS = 2000;
+const MAX_RECORDING_MS = 15000;
 
-/**
- * VoiceButton — records audio via MediaRecorder, sends to Nova Sonic,
- * plays back audio response and returns transcript.
- * Auto-stops after silence or max duration.
- * Falls back to browser SpeechRecognition if MediaRecorder unavailable.
- */
 export function VoiceButton({ onTranscript, size = "default", disabled = false }: VoiceButtonProps): React.ReactElement {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -41,6 +35,9 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sttResultRef = useRef<string | null>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const transcriptSentRef = useRef(false);
 
   const clearTimers = useCallback(() => {
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
@@ -48,12 +45,12 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
     if (silenceCheckRef.current) { clearInterval(silenceCheckRef.current); silenceCheckRef.current = null; }
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       mediaRecorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       audioContextRef.current?.close();
+      recognitionRef.current?.stop();
       clearTimers();
     };
   }, [clearTimers]);
@@ -63,19 +60,15 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
     try {
       setIsPlaying(true);
       const audioBytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
-
-      // Convert raw PCM (16-bit signed LE) to Float32
       const samples = new Float32Array(audioBytes.length / 2);
       const view = new DataView(audioBytes.buffer);
       for (let i = 0; i < samples.length; i++) {
         samples[i] = view.getInt16(i * 2, true) / 32768;
       }
-
       const ctx = new AudioContext({ sampleRate });
       audioContextRef.current = ctx;
       const buffer = ctx.createBuffer(1, samples.length, sampleRate);
       buffer.getChannelData(0).set(samples);
-
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
@@ -89,13 +82,11 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
   const sendToNovaSonic = useCallback(async (audioBlob: Blob) => {
     setIsProcessing(true);
     try {
-      // Convert blob to raw PCM 16-bit 16kHz mono
       const arrayBuffer = await audioBlob.arrayBuffer();
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       const decoded = await audioCtx.decodeAudioData(arrayBuffer);
       const channelData = decoded.getChannelData(0);
 
-      // Convert Float32 → Int16 PCM
       const pcmBuffer = new ArrayBuffer(channelData.length * 2);
       const pcmView = new DataView(pcmBuffer);
       for (let i = 0; i < channelData.length; i++) {
@@ -111,63 +102,53 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       const response = await fetch("/api/voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audioBase64: pcmBase64,
-          sampleRate: 16000,
-        }),
+        body: JSON.stringify({ audioBase64: pcmBase64, sampleRate: 16000 }),
       });
 
       const result = (await response.json()) as VoiceResponse;
 
       if (result.success) {
-        // Play audio response
         if (result.audioBase64) {
           void playAudioResponse(result.audioBase64, result.sampleRate);
         }
-        // Send transcript to parent (use assistant text if transcript empty)
         const text = result.transcript || result.text;
-        if (text) onTranscript(text);
+        if (text && !transcriptSentRef.current) {
+          transcriptSentRef.current = true;
+          onTranscript(text);
+        }
       } else {
-        // Fallback: try browser speech recognition
-        console.warn("Nova Sonic failed, falling back to browser STT:", result.error);
-        fallbackBrowserSTT();
+        // Nova Sonic failed — use browser STT result if we have one
+        if (sttResultRef.current && !transcriptSentRef.current) {
+          transcriptSentRef.current = true;
+          onTranscript(sttResultRef.current);
+        }
       }
-    } catch (error) {
-      console.warn("Voice processing error:", error);
-      fallbackBrowserSTT();
+    } catch {
+      // Error — use browser STT result if available
+      if (sttResultRef.current && !transcriptSentRef.current) {
+        transcriptSentRef.current = true;
+        onTranscript(sttResultRef.current);
+      }
     } finally {
       setIsProcessing(false);
     }
   }, [onTranscript, playAudioResponse]);
-
-  const fallbackBrowserSTT = useCallback(() => {
-    const Ctor = typeof window !== "undefined"
-      ? window.SpeechRecognition ?? window.webkitSpeechRecognition
-      : undefined;
-    if (!Ctor) return;
-
-    const recognition = new Ctor();
-    recognition.lang = "pl-PL"; // Polish first, falls back to auto-detect
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
-      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
-      if (transcript) onTranscript(transcript);
-    };
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-    try { recognition.start(); setIsListening(true); } catch { /* ignore */ }
-  }, [onTranscript]);
 
   const stopRecording = useCallback(() => {
     clearTimers();
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }
+    // Also stop browser STT
+    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
     setIsListening(false);
   }, [clearTimers]);
 
   const startRecording = useCallback(async () => {
+    // Reset state for this recording session
+    sttResultRef.current = null;
+    transcriptSentRef.current = false;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -180,7 +161,36 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       streamRef.current = stream;
       chunksRef.current = [];
 
-      // Set up silence detection via AnalyserNode
+      // --- Start browser SpeechRecognition in parallel ---
+      // This captures text immediately so we don't need a second recording attempt
+      const Ctor = typeof window !== "undefined"
+        ? window.SpeechRecognition ?? window.webkitSpeechRecognition
+        : undefined;
+      if (Ctor) {
+        try {
+          const recognition = new Ctor();
+          recognition.lang = "pl-PL";
+          recognition.continuous = false;
+          recognition.interimResults = false;
+          recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
+            const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+            if (transcript) {
+              sttResultRef.current = transcript;
+              // If Nova Sonic hasn't responded yet, send transcript immediately
+              if (!transcriptSentRef.current) {
+                transcriptSentRef.current = true;
+                onTranscript(transcript);
+              }
+            }
+          };
+          recognition.onend = () => { /* no-op — MediaRecorder handles isListening state */ };
+          recognition.onerror = () => { /* ignore — Nova Sonic is backup */ };
+          recognitionRef.current = recognition;
+          recognition.start();
+        } catch { /* SpeechRecognition not available */ }
+      }
+
+      // --- Set up silence detection via AnalyserNode ---
       const audioCtx = new AudioContext();
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
@@ -209,20 +219,18 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         }
       };
 
-      mediaRecorder.start(250); // Collect data every 250ms
+      mediaRecorder.start(250);
       setIsListening(true);
 
-      // --- Auto-stop: silence detection ---
+      // --- Silence detection ---
       let silentFrames = 0;
-      const SILENCE_THRESHOLD = 15; // RMS level below which = silence
-      const FRAMES_FOR_SILENCE = Math.ceil(SILENCE_TIMEOUT_MS / 100); // 20 frames at 100ms
+      const SILENCE_THRESHOLD = 15;
+      const FRAMES_FOR_SILENCE = Math.ceil(SILENCE_TIMEOUT_MS / 100);
 
       silenceCheckRef.current = setInterval(() => {
         if (!analyserRef.current) return;
         const data = new Uint8Array(analyserRef.current.frequencyBinCount);
         analyserRef.current.getByteFrequencyData(data);
-
-        // Calculate RMS energy
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += data[i];
         const avg = sum / data.length;
@@ -230,24 +238,37 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         if (avg < SILENCE_THRESHOLD) {
           silentFrames++;
           if (silentFrames >= FRAMES_FOR_SILENCE) {
-            // Silence detected — auto-stop
             stopRecording();
           }
         } else {
-          silentFrames = 0; // Reset on voice detected
+          silentFrames = 0;
         }
       }, 100);
 
-      // --- Auto-stop: max duration ---
       maxTimerRef.current = setTimeout(() => {
         stopRecording();
       }, MAX_RECORDING_MS);
 
     } catch {
-      // Mic permission denied — fallback
-      fallbackBrowserSTT();
+      // Mic permission denied — try browser STT alone
+      const Ctor = typeof window !== "undefined"
+        ? window.SpeechRecognition ?? window.webkitSpeechRecognition
+        : undefined;
+      if (Ctor) {
+        const recognition = new Ctor();
+        recognition.lang = "pl-PL";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.onresult = (event: { results?: { 0: { transcript?: string } }[] }) => {
+          const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+          if (transcript) onTranscript(transcript);
+        };
+        recognition.onend = () => setIsListening(false);
+        recognition.onerror = () => setIsListening(false);
+        try { recognition.start(); setIsListening(true); } catch { /* ignore */ }
+      }
     }
-  }, [sendToNovaSonic, fallbackBrowserSTT, stopRecording, clearTimers]);
+  }, [sendToNovaSonic, onTranscript, stopRecording, clearTimers]);
 
   const toggleListening = useCallback(() => {
     if (disabled || isProcessing) return;
