@@ -43,8 +43,8 @@ async function takeNativePhoto(): Promise<File | null> {
       width: 1200,
       height: 1200,
       promptLabelHeader: "Photo",
-      promptLabelPhoto: "Take Photo",
-      promptLabelPicture: "Choose from Gallery",
+      promptLabelPhoto: "Choose from Gallery",
+      promptLabelPicture: "Take Photo",
       promptLabelCancel: "Cancel",
     });
     if (!photo.base64String) return null;
