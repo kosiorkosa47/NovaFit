@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { User, Heart, Target, Camera, Check, Pencil } from "lucide-react";
+import { User, Heart, Target, Camera, Check, Pencil, Brain, Activity, ShieldAlert, Pill, Apple, Dumbbell, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { t, getLang, type Lang } from "@/lib/i18n";
+import { loadHealthTwin } from "@/lib/health-twin/storage";
+import type { HealthTwinProfile } from "@/lib/health-twin/types";
 
 const PROFILE_KEY = "nova-health-profile";
 const GOALS_KEY = "nova-health-goals";
@@ -100,6 +102,7 @@ export function ProfilePage() {
   const [editingGoal, setEditingGoal] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [lang, setLangState] = useState<Lang>("en");
+  const [twin, setTwin] = useState<HealthTwinProfile | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const goalInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -113,6 +116,10 @@ export function ProfilePage() {
     setFacts(getUserFacts());
     setGoals(getGoals());
     setLangState(getLang());
+    const loadedTwin = loadHealthTwin();
+    if (loadedTwin.conditions.length || loadedTwin.allergies.length || loadedTwin.preferences.foodLikes.length || loadedTwin.patterns.length || loadedTwin.lifestyle.length || loadedTwin.sessionSummaries.length) {
+      setTwin(loadedTwin);
+    }
     const handler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
     window.addEventListener("novafit-lang-change", handler);
     return () => window.removeEventListener("novafit-lang-change", handler);
@@ -302,6 +309,124 @@ export function ProfilePage() {
             <p className="mt-2 text-[11px] text-muted-foreground">{t("health_facts_empty", lang)}</p>
           )}
         </div>
+
+        {/* Health Twin — AI-learned profile */}
+        {twin && (
+          <div className="glass-panel rounded-2xl px-4 py-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Brain className="h-4 w-4 text-violet-400" />
+              <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">
+                {lang === "pl" ? "Twój Health Twin" : "Your Health Twin"}
+              </span>
+              <span className="ml-auto text-[9px] text-muted-foreground/50">
+                {twin.averages.sessionsCount} {lang === "pl" ? "sesji" : "sessions"}
+              </span>
+            </div>
+
+            {twin.conditions.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <ShieldAlert className="h-3 w-3 text-amber-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Schorzenia" : "Conditions"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.conditions.map((c) => <Badge key={c} variant="outline" className="text-[9px] border-amber-500/30 text-amber-300">{c}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {twin.allergies.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <ShieldAlert className="h-3 w-3 text-red-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Alergie" : "Allergies"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.allergies.map((a) => <Badge key={a} variant="outline" className="text-[9px] border-red-500/30 text-red-300">{a}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {twin.medications.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Pill className="h-3 w-3 text-blue-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Leki" : "Medications"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.medications.map((m) => <Badge key={m} variant="outline" className="text-[9px] border-blue-500/30 text-blue-300">{m}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {(twin.preferences.foodLikes.length > 0 || twin.preferences.foodDislikes.length > 0) && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Apple className="h-3 w-3 text-green-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Jedzenie" : "Food"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.preferences.foodLikes.map((f) => <Badge key={f} variant="outline" className="text-[9px] border-green-500/30 text-green-300">+ {f}</Badge>)}
+                  {twin.preferences.foodDislikes.map((f) => <Badge key={f} variant="outline" className="text-[9px] border-red-500/30 text-red-300">- {f}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {(twin.preferences.exerciseLikes.length > 0 || twin.preferences.exerciseDislikes.length > 0) && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Dumbbell className="h-3 w-3 text-cyan-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Aktywność" : "Exercise"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.preferences.exerciseLikes.map((e) => <Badge key={e} variant="outline" className="text-[9px] border-cyan-500/30 text-cyan-300">+ {e}</Badge>)}
+                  {twin.preferences.exerciseDislikes.map((e) => <Badge key={e} variant="outline" className="text-[9px] border-red-500/30 text-red-300">- {e}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {twin.patterns.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Activity className="h-3 w-3 text-purple-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Wzorce" : "Patterns"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.patterns.map((p) => <Badge key={p} variant="secondary" className="text-[9px]">{p}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {twin.lifestyle.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <User className="h-3 w-3 text-slate-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Styl życia" : "Lifestyle"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {twin.lifestyle.map((l) => <Badge key={l} variant="secondary" className="text-[9px]">{l}</Badge>)}
+                </div>
+              </div>
+            )}
+
+            {twin.sessionSummaries.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Clock className="h-3 w-3 text-emerald-400" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{lang === "pl" ? "Ostatnie sesje" : "Recent sessions"}</span>
+                </div>
+                <div className="space-y-1">
+                  {twin.sessionSummaries.slice(-5).reverse().map((s, i) => (
+                    <div key={i} className="text-[10px] text-muted-foreground/80">
+                      <span className="text-emerald-400">{new Date(s.date).toLocaleDateString()}</span>
+                      {" — "}{s.keyFinding}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Editable goals */}
         <div className="glass-panel rounded-2xl px-4 py-4">

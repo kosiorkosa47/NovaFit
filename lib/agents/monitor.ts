@@ -1,5 +1,6 @@
 import { invokeNovaLite } from "@/lib/bedrock/invoke";
 import type { AnalyzerResult, PlanRecommendation, MonitorResult } from "@/lib/orchestrator/types";
+import type { ProfileUpdates } from "@/lib/health-twin/types";
 import { MONITOR_SYSTEM_PROMPT } from "@/lib/orchestrator/prompts";
 import type { ChatMessage } from "@/lib/session/session.types";
 import { logAgentStart, logAgentDone, logAgentError } from "@/lib/utils/logging";
@@ -18,6 +19,37 @@ function extractJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
+function parseProfileUpdates(raw: unknown): ProfileUpdates | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const updates: ProfileUpdates = {};
+  let hasAny = false;
+
+  const arrayFields = [
+    "addConditions", "addAllergies", "addMedications",
+    "addFoodLikes", "addFoodDislikes",
+    "addExerciseLikes", "addExerciseDislikes",
+    "addPatterns", "addLifestyle"
+  ] as const;
+
+  for (const key of arrayFields) {
+    if (Array.isArray(obj[key]) && obj[key].length > 0) {
+      const filtered = (obj[key] as unknown[]).map(String).filter(s => s.length > 1 && s.length < 200);
+      if (filtered.length) {
+        (updates as Record<string, string[]>)[key] = filtered;
+        hasAny = true;
+      }
+    }
+  }
+
+  if (typeof obj.sessionNote === "string" && obj.sessionNote.length > 2) {
+    updates.sessionNote = obj.sessionNote.slice(0, 200);
+    hasAny = true;
+  }
+
+  return hasAny ? updates : undefined;
+}
+
 function parseMonitorResult(raw: string): MonitorResult {
   const parsed = extractJsonObject(raw);
 
@@ -34,7 +66,8 @@ function parseMonitorResult(raw: string): MonitorResult {
     adaptationNote:
       typeof parsed?.adaptationNote === "string"
         ? parsed.adaptationNote
-        : "Adjust plan intensity based on user preference next turn."
+        : "Adjust plan intensity based on user preference next turn.",
+    profileUpdates: parseProfileUpdates(parsed?.profileUpdates),
   };
 }
 
@@ -79,7 +112,7 @@ export async function runMonitor(input: MonitorInput): Promise<{ raw: string; pa
       systemPrompt: MONITOR_SYSTEM_PROMPT,
       userPrompt,
       history: input.history,
-      maxTokens: 500,
+      maxTokens: 700,
       temperature: 0.5
     });
 

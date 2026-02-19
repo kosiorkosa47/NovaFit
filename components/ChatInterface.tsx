@@ -18,6 +18,8 @@ import { ensureSessionId, sanitizeMessageInput } from "@/lib/utils";
 import { saveHistoryEntry } from "@/components/HistoryPage";
 import { t, getLang, type Lang } from "@/lib/i18n";
 import { getHealthData } from "@/lib/sensors/health-bridge";
+import { loadHealthTwin, saveHealthTwin, applyProfileUpdates, addSessionSummary, formatHealthTwinForPrompt } from "@/lib/health-twin/storage";
+import type { ProfileUpdates } from "@/lib/health-twin/types";
 
 /** Safe unique ID — fallback for HTTP (no secure context) */
 function uid(): string {
@@ -489,6 +491,22 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                     analyzerSummary: payload.analyzerSummary
                   });
                 }
+                // Health Twin: save profile updates from agent
+                if (payload?.profileUpdates) {
+                  try {
+                    const twin = loadHealthTwin();
+                    const updated = applyProfileUpdates(twin, payload.profileUpdates);
+                    // Add session summary with energy score
+                    const topics = payload.profileUpdates.sessionNote
+                      ? [payload.profileUpdates.sessionNote]
+                      : [payload.analyzerSummary?.slice(0, 80) ?? "conversation"];
+                    addSessionSummary(updated, 0, topics, payload.profileUpdates.sessionNote ?? payload.analyzerSummary ?? "");
+                    saveHealthTwin(updated);
+                    console.log("[health-twin] Profile updated:", payload.profileUpdates);
+                  } catch (e) {
+                    console.warn("[health-twin] Failed to save profile:", e);
+                  }
+                }
               }
               if (parsed.eventType === "error") throw new Error(eventData.message ?? "Unknown stream error");
             } catch (error) {
@@ -630,9 +648,18 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
           if (raw) recentMeals = JSON.parse(raw) as UserContext["recentMeals"];
         } catch { /* ignore */ }
 
+        // Load Health Twin profile for agent context
+        let healthTwinContext: string | undefined;
+        try {
+          const twin = loadHealthTwin();
+          const formatted = formatHealthTwinForPrompt(twin);
+          if (formatted) healthTwinContext = formatted;
+        } catch { /* ignore */ }
+
         userContext = {
           name: typeof profile.name === "string" ? profile.name : undefined,
           goals: Object.keys(goals).length > 0 ? goals as UserContext["goals"] : undefined,
+          healthTwin: healthTwinContext,
           healthData,
           recentMeals,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

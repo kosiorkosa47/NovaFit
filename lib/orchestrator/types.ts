@@ -1,4 +1,5 @@
 import type { WearableSnapshot } from "@/lib/integrations/wearables.mock";
+import type { ProfileUpdates } from "@/lib/health-twin/types";
 
 export type AgentName = "analyzer" | "planner" | "monitor";
 
@@ -39,6 +40,7 @@ export interface MonitorResult {
   tone: string;
   feedbackPrompt: string;
   adaptationNote: string;
+  profileUpdates?: ProfileUpdates;
 }
 
 export interface AgentStepResult<T> {
@@ -55,6 +57,8 @@ export interface ImageAttachment {
 export interface UserContext {
   name?: string;
   goals?: { calories?: number; steps?: number; sleep?: number; water?: number };
+  /** Health Twin — persistent knowledge built from past conversations */
+  healthTwin?: string;
   healthData?: {
     steps: number;
     heartRate: number | null;
@@ -96,6 +100,7 @@ export interface AgentApiResponse {
   monitorTone: string;
   memorySize: number;
   wearableSnapshot?: WearableSnapshot;
+  profileUpdates?: ProfileUpdates;
 }
 
 export interface OrchestratorInput {

@@ -69,6 +69,10 @@ function formatUserContext(ctx?: UserContext): string {
     });
     parts.push(`Recent meals (photo-analyzed today):\n${mealLines.join("\n")}`);
   }
+  // Health Twin — persistent profile from past conversations
+  if (ctx.healthTwin) {
+    parts.push(`\n${ctx.healthTwin}`);
+  }
   return parts.length ? parts.join("\n") : "";
 }
 
@@ -292,7 +296,8 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     plan,
     monitorTone: monitor.tone,
     memorySize: getMemorySize(input.sessionId),
-    wearableSnapshot: wearable
+    wearableSnapshot: wearable,
+    profileUpdates: monitor.profileUpdates,
   };
 
   return {
