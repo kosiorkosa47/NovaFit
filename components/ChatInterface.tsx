@@ -76,6 +76,7 @@ interface UiMessage {
   plan?: PlanRecommendation;
   wearable?: WearableSnapshot;
   analyzerSummary?: string;
+  agentPayload?: unknown;
   scanResult?: ScanResponse;
   mealResult?: MealAnalysis;
   imagePreview?: string;
@@ -413,7 +414,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     [speakText, startInactivityTimer]
   );
 
-  const addAgentUpdate = useCallback((agent: string | undefined, content: string) => {
+  const addAgentUpdate = useCallback((agent: string | undefined, content: string, payload?: unknown) => {
     setMessages((prev) => [
       ...prev,
       {
@@ -421,7 +422,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
         role: "agent",
         content,
         timestamp: new Date().toISOString(),
-        agentLabel: agent ? `${agent[0].toUpperCase()}${agent.slice(1)} Agent` : "Agent"
+        agentLabel: agent ? `${agent[0].toUpperCase()}${agent.slice(1)} Agent` : "Agent",
+        agentPayload: payload
       }
     ]);
   }, []);
@@ -451,7 +453,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
               const eventData = JSON.parse(parsed.data) as SseEvent;
 
               if (parsed.eventType === "status") setStatusLabel(eventData.message ?? null);
-              if (parsed.eventType === "agent_update") addAgentUpdate(eventData.agent, eventData.message ?? "Agent update");
+              if (parsed.eventType === "agent_update") addAgentUpdate(eventData.agent, eventData.message ?? "Agent update", eventData.payload);
               if (parsed.eventType === "final") {
                 const payload = eventData.payload as AgentApiResponse | undefined;
                 if (payload?.reply) {
@@ -589,10 +591,18 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
           healthData = { steps: hd.steps, heartRate: hd.heartRate, calories: hd.calories, sleep: hd.sleep, stress: hd.stress, source: hd.source };
         } catch { /* sensor unavailable */ }
 
+        // Load recent meal analyses for agent context
+        let recentMeals: UserContext["recentMeals"];
+        try {
+          const raw = localStorage.getItem("nova-health-recent-meals");
+          if (raw) recentMeals = JSON.parse(raw) as UserContext["recentMeals"];
+        } catch { /* ignore */ }
+
         userContext = {
           name: typeof profile.name === "string" ? profile.name : undefined,
           goals: Object.keys(goals).length > 0 ? goals as UserContext["goals"] : undefined,
           healthData,
+          recentMeals,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           locale: navigator.language,
           timeOfDay,
@@ -825,6 +835,22 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
         ]);
         speakText(result.summary);
         startInactivityTimer();
+
+        // Store meal analysis for agent pipeline context
+        try {
+          const existing = JSON.parse(localStorage.getItem("nova-health-recent-meals") || "[]") as unknown[];
+          const entry = {
+            summary: result.summary,
+            totalCalories: result.totalCalories,
+            totalProtein: result.totalProtein,
+            totalCarbs: result.totalCarbs,
+            totalFat: result.totalFat,
+            analyzedAt: new Date().toISOString(),
+          };
+          // Keep last 5 meals
+          const updated = [entry, ...existing].slice(0, 5);
+          localStorage.setItem("nova-health-recent-meals", JSON.stringify(updated));
+        } catch { /* ignore storage errors */ }
       }
     } catch {
       toast.error("Failed to analyze the meal.");
@@ -967,6 +993,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                 plan={message.plan}
                 wearable={message.wearable}
                 analyzerSummary={message.analyzerSummary}
+                agentPayload={message.agentPayload}
               />
               {message.scanResult && (
                 <NutritionScanCard data={message.scanResult} />

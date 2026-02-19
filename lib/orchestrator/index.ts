@@ -59,6 +59,13 @@ function formatUserContext(ctx?: UserContext): string {
     if (g.water) goalParts.push(`${g.water}ml water`);
     if (goalParts.length) parts.push(`Daily goals: ${goalParts.join(", ")}`);
   }
+  if (ctx.recentMeals && ctx.recentMeals.length > 0) {
+    const mealLines = ctx.recentMeals.slice(0, 3).map((m) => {
+      const time = new Date(m.analyzedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return `  - ${time}: ${m.totalCalories} kcal (P:${m.totalProtein}g C:${m.totalCarbs}g F:${m.totalFat}g) — ${m.summary.slice(0, 80)}`;
+    });
+    parts.push(`Recent meals (photo-analyzed today):\n${mealLines.join("\n")}`);
+  }
   return parts.length ? parts.join("\n") : "";
 }
 

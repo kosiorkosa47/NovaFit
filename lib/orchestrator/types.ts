@@ -63,6 +63,14 @@ export interface UserContext {
     stress: number;
     source: string;
   };
+  recentMeals?: {
+    summary: string;
+    totalCalories: number;
+    totalProtein: number;
+    totalCarbs: number;
+    totalFat: number;
+    analyzedAt: string;
+  }[];
   timezone?: string;
   locale?: string;
   timeOfDay?: string;

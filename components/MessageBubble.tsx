@@ -2,6 +2,7 @@
 
 import { Activity, Bot, Brain, ClipboardList, Stethoscope, UserRound } from "lucide-react";
 
+import { AgentReasoningPanel } from "@/components/AgentReasoningPanel";
 import { PlanCards } from "@/components/PlanCards";
 import type { PlanRecommendation } from "@/lib/types";
 import type { WearableSnapshot } from "@/lib/types";
@@ -15,6 +16,7 @@ export interface MessageBubbleProps {
   plan?: PlanRecommendation;
   wearable?: WearableSnapshot;
   analyzerSummary?: string;
+  agentPayload?: unknown;
 }
 
 function getAgentIcon(label?: string): React.ReactElement {
@@ -32,7 +34,8 @@ export function MessageBubble({
   agentLabel,
   plan,
   wearable,
-  analyzerSummary
+  analyzerSummary,
+  agentPayload
 }: MessageBubbleProps): React.ReactElement {
   const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -49,6 +52,7 @@ export function MessageBubble({
           </span>
           <span className="ml-1.5 text-[10px] text-muted-foreground">{timeStr}</span>
           <p className="text-xs leading-relaxed text-muted-foreground">{content}</p>
+          <AgentReasoningPanel agentLabel={agentLabel} payload={agentPayload} />
         </div>
       </div>
     );
