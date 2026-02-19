@@ -36,24 +36,24 @@ async function takeNativePhoto(): Promise<File | null> {
   try {
     const { Camera, CameraResultType, CameraSource } = await import("@capacitor/camera");
     const photo = await Camera.getPhoto({
-      quality: 85,
+      quality: 75,
       allowEditing: false,
-      resultType: CameraResultType.Base64,
-      source: CameraSource.Prompt, // Shows native "Camera / Gallery" picker
-      width: 1200,
-      height: 1200,
+      resultType: CameraResultType.DataUrl, // DataUrl avoids manual base64 → ArrayBuffer
+      source: CameraSource.Prompt,
+      width: 800,
+      height: 800,
+      correctOrientation: true,
       promptLabelHeader: "Photo",
       promptLabelPhoto: "Choose from Gallery",
       promptLabelPicture: "Take Photo",
       promptLabelCancel: "Cancel",
     });
-    if (!photo.base64String) return null;
-    const byteString = atob(photo.base64String);
-    const ab = new ArrayBuffer(byteString.length);
-    const ia = new Uint8Array(ab);
-    for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+    if (!photo.dataUrl) return null;
+    // Convert data URL to File via fetch — memory-efficient, no atob loop
+    const resp = await fetch(photo.dataUrl);
+    const blob = await resp.blob();
     const mime = photo.format === "png" ? "image/png" : "image/jpeg";
-    return new File([ab], `photo.${photo.format}`, { type: mime });
+    return new File([blob], `photo.${photo.format}`, { type: mime });
   } catch {
     // User cancelled or camera not available
     return null;
@@ -75,7 +75,30 @@ interface UiMessage {
 }
 
 const SESSION_STORAGE_KEY = "nova-health-session-id";
+const MESSAGES_STORAGE_PREFIX = "nova-health-messages-";
 const INACTIVITY_REMINDER_MS = 30_000;
+
+/** Save messages to localStorage for a session (without blob URLs which can't be serialized) */
+function persistMessages(sessionId: string, messages: UiMessage[]) {
+  if (!sessionId) return;
+  try {
+    const serializable = messages.map((m) => ({
+      ...m,
+      imagePreview: undefined, // blob URLs don't survive reload
+    }));
+    localStorage.setItem(MESSAGES_STORAGE_PREFIX + sessionId, JSON.stringify(serializable));
+  } catch { /* storage full — ignore */ }
+}
+
+/** Load saved messages for a session */
+function loadMessages(sessionId: string): UiMessage[] {
+  try {
+    const raw = localStorage.getItem(MESSAGES_STORAGE_PREFIX + sessionId);
+    return raw ? (JSON.parse(raw) as UiMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 function parseSseChunk(chunk: string): { eventType: string; data: string } | null {
   const lines = chunk.replace(/\r\n/g, "\n").split("\n");
@@ -195,11 +218,47 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
     const safeSession = ensureSessionId(existingSession ?? undefined);
     window.localStorage.setItem(SESSION_STORAGE_KEY, safeSession);
     setSessionId(safeSession);
+
+    // Load saved messages for this session
+    const saved = loadMessages(safeSession);
+    if (saved.length > 0) {
+      setMessages(saved);
+      setHasStarted(true);
+    }
+
     setLangState(getLang());
-    const handler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
-    window.addEventListener("novafit-lang-change", handler);
-    return () => window.removeEventListener("novafit-lang-change", handler);
+    const langHandler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
+    window.addEventListener("novafit-lang-change", langHandler);
+
+    // Listen for session switches from History tab
+    const sessionHandler = (e: Event) => {
+      const newSessionId = (e as CustomEvent).detail as string;
+      if (!newSessionId) return;
+      setSessionId(newSessionId);
+      window.localStorage.setItem(SESSION_STORAGE_KEY, newSessionId);
+      const savedMsgs = loadMessages(newSessionId);
+      if (savedMsgs.length > 0) {
+        setMessages(savedMsgs);
+        setHasStarted(true);
+      } else {
+        setMessages([]);
+        setHasStarted(false);
+      }
+    };
+    window.addEventListener("novafit-session-switch", sessionHandler);
+
+    return () => {
+      window.removeEventListener("novafit-lang-change", langHandler);
+      window.removeEventListener("novafit-session-switch", sessionHandler);
+    };
   }, []);
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (sessionId && messages.length > 0) {
+      persistMessages(sessionId, messages);
+    }
+  }, [sessionId, messages]);
 
   // Auto-scroll to bottom
   useEffect(() => {

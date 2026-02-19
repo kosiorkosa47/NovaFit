@@ -53,6 +53,8 @@ export function AppShell() {
   const switchToChat = useCallback((sessionId?: string) => {
     if (sessionId) {
       localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+      // Notify ChatInterface to load the session's messages
+      window.dispatchEvent(new CustomEvent("novafit-session-switch", { detail: sessionId }));
     }
     setActiveTab("chat");
   }, []);
