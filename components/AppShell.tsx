@@ -15,6 +15,7 @@ const SESSION_STORAGE_KEY = "nova-health-session-id";
 export function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [voiceOutput, setVoiceOutput] = useState(true);
+  const [chatSessionId, setChatSessionId] = useState<string | undefined>();
 
   // Configure Android status bar — adapt to theme
   useEffect(() => {
@@ -52,9 +53,8 @@ export function AppShell() {
 
   const switchToChat = useCallback((sessionId?: string) => {
     if (sessionId) {
-      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-      // Notify ChatInterface to load the session's messages
-      window.dispatchEvent(new CustomEvent("novafit-session-switch", { detail: sessionId }));
+      // Use unique string each time to force useEffect even if same sessionId
+      setChatSessionId(sessionId + ":" + Date.now());
     }
     setActiveTab("chat");
   }, []);
@@ -95,7 +95,7 @@ export function AppShell() {
           className="flex min-h-0 flex-1 flex-col"
           style={{ display: activeTab === "chat" ? "flex" : "none" }}
         >
-          <ChatInterface voiceOutput={voiceOutput} />
+          <ChatInterface voiceOutput={voiceOutput} loadSessionId={chatSessionId} />
         </div>
 
         {activeTab === "dashboard" && (

@@ -192,9 +192,11 @@ function WelcomeScreen({ onVoiceTranscript }: { onVoiceTranscript: (text: string
 
 interface ChatInterfaceProps {
   voiceOutput?: boolean;
+  /** When set/changed, load this session's messages */
+  loadSessionId?: string;
 }
 
-export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React.ReactElement {
+export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfaceProps): React.ReactElement {
   const [sessionId, setSessionId] = useState<string>("");
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [hasStarted, setHasStarted] = useState(false);
@@ -229,29 +231,26 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
     setLangState(getLang());
     const langHandler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
     window.addEventListener("novafit-lang-change", langHandler);
-
-    // Listen for session switches from History tab
-    const sessionHandler = (e: Event) => {
-      const newSessionId = (e as CustomEvent).detail as string;
-      if (!newSessionId) return;
-      setSessionId(newSessionId);
-      window.localStorage.setItem(SESSION_STORAGE_KEY, newSessionId);
-      const savedMsgs = loadMessages(newSessionId);
-      if (savedMsgs.length > 0) {
-        setMessages(savedMsgs);
-        setHasStarted(true);
-      } else {
-        setMessages([]);
-        setHasStarted(false);
-      }
-    };
-    window.addEventListener("novafit-session-switch", sessionHandler);
-
-    return () => {
-      window.removeEventListener("novafit-lang-change", langHandler);
-      window.removeEventListener("novafit-session-switch", sessionHandler);
-    };
+    return () => window.removeEventListener("novafit-lang-change", langHandler);
   }, []);
+
+  // Load a different session when History sends us a sessionId via prop
+  useEffect(() => {
+    if (!loadSessionId) return;
+    // Strip timestamp suffix appended by AppShell (format: "sessionId:timestamp")
+    const lastColon = loadSessionId.lastIndexOf(":");
+    const sid = lastColon > 0 ? loadSessionId.substring(0, lastColon) : loadSessionId;
+    setSessionId(sid);
+    window.localStorage.setItem(SESSION_STORAGE_KEY, sid);
+    const saved = loadMessages(sid);
+    if (saved.length > 0) {
+      setMessages(saved);
+      setHasStarted(true);
+    } else {
+      setMessages([]);
+      setHasStarted(false);
+    }
+  }, [loadSessionId]);
 
   // Persist messages to localStorage whenever they change
   useEffect(() => {

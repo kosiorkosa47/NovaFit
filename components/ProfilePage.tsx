@@ -243,8 +243,8 @@ export function ProfilePage() {
             </div>
           </button>
           {photoInput}
-          {/* Centered name input row */}
-          <div className="flex items-center justify-center gap-2">
+          {/* Centered name input with save inside */}
+          <div className="relative w-52">
             <input
               type="text"
               value={name}
@@ -253,12 +253,12 @@ export function ProfilePage() {
                 setSaved(false);
               }}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="w-48 rounded-lg border border-input bg-background px-2 py-1.5 text-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-lg border border-input bg-background px-3 py-1.5 pr-10 text-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <button
               type="button"
               onClick={handleSave}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
+              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
             >
               <Save className="h-3.5 w-3.5" />
             </button>
