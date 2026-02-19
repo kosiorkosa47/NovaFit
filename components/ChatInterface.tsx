@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Mic, SendHorizontal, UtensilsCrossed, ScanBarcode } from "lucide-react";
+import { Camera, Mic, SendHorizontal, UtensilsCrossed, ScanBarcode, ImageIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -23,6 +23,40 @@ function uid(): string {
     try { return crypto.randomUUID(); } catch { /* secure context required */ }
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/** Check if running inside Capacitor native app */
+function isNative(): boolean {
+  return typeof window !== "undefined" && !!(window as unknown as Record<string, unknown>).Capacitor;
+}
+
+/** Use Capacitor Camera plugin for native photo capture (camera + gallery picker) */
+async function takeNativePhoto(): Promise<File | null> {
+  try {
+    const { Camera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+    const photo = await Camera.getPhoto({
+      quality: 85,
+      allowEditing: false,
+      resultType: CameraResultType.Base64,
+      source: CameraSource.Prompt, // Shows native "Camera / Gallery" picker
+      width: 1200,
+      height: 1200,
+      promptLabelHeader: "Photo",
+      promptLabelPhoto: "Take Photo",
+      promptLabelPicture: "Choose from Gallery",
+      promptLabelCancel: "Cancel",
+    });
+    if (!photo.base64String) return null;
+    const byteString = atob(photo.base64String);
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+    const mime = photo.format === "png" ? "image/png" : "image/jpeg";
+    return new File([ab], `photo.${photo.format}`, { type: mime });
+  } catch {
+    // User cancelled or camera not available
+    return null;
+  }
 }
 
 interface UiMessage {
@@ -721,7 +755,16 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
               <div className="absolute bottom-full left-0 mb-2 w-48 overflow-hidden rounded-xl border border-white/40 bg-white/90 shadow-lg backdrop-blur-xl dark:border-emerald-800/30 dark:bg-emerald-950/90">
                 <button
                   type="button"
-                  onClick={() => { setCameraMode("meal"); setShowCameraMenu(false); fileInputRef.current?.click(); }}
+                  onClick={async () => {
+                    setShowCameraMenu(false);
+                    if (isNative()) {
+                      const file = await takeNativePhoto();
+                      if (file) void handleMealUpload(file);
+                    } else {
+                      setCameraMode("meal");
+                      fileInputRef.current?.click();
+                    }
+                  }}
                   className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/40"
                 >
                   <UtensilsCrossed className="h-4 w-4 text-emerald-600" />
@@ -729,7 +772,16 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setCameraMode("label"); setShowCameraMenu(false); fileInputRef.current?.click(); }}
+                  onClick={async () => {
+                    setShowCameraMenu(false);
+                    if (isNative()) {
+                      const file = await takeNativePhoto();
+                      if (file) void handleScanUpload(file);
+                    } else {
+                      setCameraMode("label");
+                      fileInputRef.current?.click();
+                    }
+                  }}
                   className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
                 >
                   <ScanBarcode className="h-4 w-4 text-amber-600" />
@@ -742,7 +794,6 @@ export function ChatInterface({ voiceOutput = true }: ChatInterfaceProps): React
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             onChange={handleFileInputChange}
             className="hidden"
           />

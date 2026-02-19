@@ -4,6 +4,7 @@ import { Volume2, Watch, Globe, Palette, Info, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import { clearHistory } from "@/components/HistoryPage";
+import { getLang, setLang, type Lang } from "@/lib/i18n";
 
 interface SettingsPageProps {
   voiceOutput: boolean;
@@ -40,11 +41,21 @@ function SettingRow({
 export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageProps) {
   const [dark, setDark] = useState(false);
   const [mockWearable, setMockWearable] = useState(true);
+  const [lang, setLangState] = useState<Lang>("en");
 
   useEffect(() => {
     // Sync theme state with DOM after hydration
     setDark(document.documentElement.classList.contains("dark")); // eslint-disable-line react-hooks/set-state-in-effect
+    setLangState(getLang()); // eslint-disable-line react-hooks/set-state-in-effect
   }, []);
+
+  const toggleLang = () => {
+    const newLang: Lang = lang === "en" ? "pl" : "en";
+    setLangState(newLang);
+    setLang(newLang);
+    // Dispatch event so other components can react
+    window.dispatchEvent(new CustomEvent("novafit-lang-change", { detail: newLang }));
+  };
 
   const toggleTheme = (checked: boolean) => {
     setDark(checked);
@@ -96,9 +107,15 @@ export function SettingsPage({ voiceOutput, onVoiceOutputChange }: SettingsPageP
           <SettingRow
             icon={<Globe className="h-4 w-4 text-indigo-500" />}
             label="Language"
-            description="Interface language"
+            description={lang === "en" ? "App display language" : "Język wyświetlania aplikacji"}
           >
-            <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium">EN</span>
+            <button
+              type="button"
+              onClick={toggleLang}
+              className="flex items-center gap-1 rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-muted/80"
+            >
+              {lang === "en" ? "🇬🇧 EN" : "🇵🇱 PL"}
+            </button>
           </SettingRow>
         </div>
 

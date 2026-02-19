@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { User, Heart, Target, Save } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { User, Heart, Target, Save, Camera } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 const PROFILE_KEY = "nova-health-profile";
 
 interface ProfileData {
   name: string;
+  photo?: string; // base64 data URL
   createdAt: string;
 }
 
@@ -35,11 +36,9 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-// Try to extract user facts from session memory (localStorage)
 function getUserFacts(): string[] {
   if (typeof window === "undefined") return [];
   try {
-    // Check for facts stored by the agent pipeline
     const raw = localStorage.getItem("nova-health-user-facts");
     if (raw) return JSON.parse(raw) as string[];
   } catch {
@@ -48,18 +47,47 @@ function getUserFacts(): string[] {
   return [];
 }
 
+/** Check if running inside Capacitor native app */
+function isNative(): boolean {
+  return typeof window !== "undefined" && !!(window as unknown as Record<string, unknown>).Capacitor;
+}
+
+/** Resize image to max 200x200 and return as base64 data URL */
+function resizeImage(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 200;
+        let w = img.width, h = img.height;
+        if (w > h) { h = (h / w) * MAX; w = MAX; } else { w = (w / h) * MAX; h = MAX; }
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function ProfilePage() {
   const [name, setName] = useState("");
+  const [photo, setPhoto] = useState<string | undefined>();
   const [saved, setSaved] = useState(false);
-  const [isNew, setIsNew] = useState(true);
+  const [profileExists, setProfileExists] = useState(false);
   const [facts, setFacts] = useState<string[]>([]);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // Client-only read from localStorage on mount
     const profile = getProfile();
     if (profile) {
-      setName(profile.name); // eslint-disable-line react-hooks/set-state-in-effect
-      setIsNew(false);
+      setName(profile.name);
+      setPhoto(profile.photo);
+      setProfileExists(true);
     }
     setFacts(getUserFacts());
   }, []);
@@ -67,10 +95,61 @@ export function ProfilePage() {
   const handleSave = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    saveProfile({ name: trimmed, createdAt: new Date().toISOString() });
-    setIsNew(false);
+    saveProfile({ name: trimmed, photo, createdAt: new Date().toISOString() });
+    setProfileExists(true);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handlePhotoSelect = async (source: "native" | "file", file?: File) => {
+    let imageFile: File | null = null;
+
+    if (source === "native") {
+      try {
+        const { Camera: CapCamera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+        const result = await CapCamera.getPhoto({
+          quality: 80,
+          allowEditing: true,
+          resultType: CameraResultType.Base64,
+          source: CameraSource.Prompt,
+          width: 400,
+          height: 400,
+          promptLabelHeader: "Profile Photo",
+          promptLabelPhoto: "Take Photo",
+          promptLabelPicture: "Choose from Gallery",
+          promptLabelCancel: "Cancel",
+        });
+        if (!result.base64String) return;
+        const byteString = atob(result.base64String);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const mime = result.format === "png" ? "image/png" : "image/jpeg";
+        imageFile = new File([ab], `photo.${result.format}`, { type: mime });
+      } catch {
+        return; // cancelled
+      }
+    } else if (file) {
+      imageFile = file;
+    }
+
+    if (!imageFile) return;
+    const dataUrl = await resizeImage(imageFile);
+    setPhoto(dataUrl);
+    // Auto-save if profile already exists
+    if (profileExists && name.trim()) {
+      saveProfile({ name: name.trim(), photo: dataUrl, createdAt: new Date().toISOString() });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
+  };
+
+  const handlePhotoClick = () => {
+    if (isNative()) {
+      void handlePhotoSelect("native");
+    } else {
+      photoInputRef.current?.click();
+    }
   };
 
   const goals = [
@@ -80,12 +159,36 @@ export function ProfilePage() {
     { label: "Exercise", value: "30 min / day" },
   ];
 
-  if (isNew && !name) {
+  // Setup view — only shown when no profile has been saved yet
+  if (!profileExists) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6">
-        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/60">
-          <User className="h-9 w-9 text-emerald-600 dark:text-emerald-400" />
-        </div>
+        {/* Avatar with photo option */}
+        <button
+          type="button"
+          onClick={handlePhotoClick}
+          className="group relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/60"
+        >
+          {photo ? (
+            <img src={photo} alt="Profile" className="h-20 w-20 rounded-full object-cover" />
+          ) : (
+            <User className="h-9 w-9 text-emerald-600 dark:text-emerald-400" />
+          )}
+          <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-active:opacity-100">
+            <Camera className="h-5 w-5 text-white" />
+          </div>
+        </button>
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handlePhotoSelect("file", f);
+            e.target.value = "";
+          }}
+          className="hidden"
+        />
         <div className="text-center">
           <h2 className="text-lg font-semibold">Set up your profile</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -119,9 +222,33 @@ export function ProfilePage() {
       <div className="stagger-children mx-auto max-w-lg space-y-4">
         {/* Avatar + name */}
         <div className="flex flex-col items-center gap-3 py-4">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 text-xl font-light tracking-wide text-emerald-700 shadow-zen dark:bg-emerald-400/10 dark:text-emerald-300">
-            {getInitials(name || "U")}
-          </div>
+          <button
+            type="button"
+            onClick={handlePhotoClick}
+            className="group relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 shadow-zen dark:bg-emerald-400/10"
+          >
+            {photo ? (
+              <img src={photo} alt="Profile" className="h-20 w-20 rounded-full object-cover" />
+            ) : (
+              <span className="text-xl font-light tracking-wide text-emerald-700 dark:text-emerald-300">
+                {getInitials(name || "U")}
+              </span>
+            )}
+            <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-active:opacity-100">
+              <Camera className="h-5 w-5 text-white" />
+            </div>
+          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handlePhotoSelect("file", f);
+              e.target.value = "";
+            }}
+            className="hidden"
+          />
           <div className="flex items-center gap-2">
             <input
               type="text"
