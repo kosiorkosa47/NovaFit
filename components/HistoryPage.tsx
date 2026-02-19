@@ -40,6 +40,14 @@ export function clearHistory() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+export function deleteHistoryEntry(sessionId: string) {
+  const existing = getHistory();
+  const filtered = existing.filter((e) => e.sessionId !== sessionId);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+  // Also remove persisted messages for that session
+  localStorage.removeItem(`nova-health-messages-${sessionId}`);
+}
+
 // ---------------------------------------------------------------------------
 
 interface HistoryPageProps {
@@ -103,34 +111,47 @@ export function HistoryPage({ onOpenSession }: HistoryPageProps) {
         {entries.map((entry) => {
           const date = new Date(entry.timestamp);
           return (
-            <button
-              key={entry.sessionId + entry.timestamp}
-              type="button"
-              onClick={() => onOpenSession(entry.sessionId)}
-              className="glass-panel tap-feedback flex w-full flex-col gap-1.5 rounded-2xl px-4 py-3.5 text-left transition-all duration-300 hover:shadow-zen"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">
-                  {date.toLocaleDateString(dateLang)} {date.toLocaleTimeString(dateLang, { hour: "2-digit", minute: "2-digit" })}
-                </span>
-                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <MessageCircle className="h-3 w-3" />
-                  {entry.messageCount}
-                </span>
-              </div>
-              <p className="line-clamp-2 text-xs text-foreground/80">
-                {entry.firstMessage}
-              </p>
-              {entry.topics.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {entry.topics.map((topic) => (
-                    <Badge key={topic} variant="secondary" className="text-[9px] px-1.5 py-0">
-                      {topic}
-                    </Badge>
-                  ))}
+            <div key={entry.sessionId + entry.timestamp} className="relative">
+              <button
+                type="button"
+                onClick={() => onOpenSession(entry.sessionId)}
+                className="glass-panel tap-feedback flex w-full flex-col gap-1.5 rounded-2xl px-4 py-3.5 pr-10 text-left transition-all duration-300 hover:shadow-zen"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">
+                    {date.toLocaleDateString(dateLang)} {date.toLocaleTimeString(dateLang, { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <MessageCircle className="h-3 w-3" />
+                    {entry.messageCount}
+                  </span>
                 </div>
-              )}
-            </button>
+                <p className="line-clamp-2 text-xs text-foreground/80">
+                  {entry.firstMessage}
+                </p>
+                {entry.topics.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {entry.topics.map((topic) => (
+                      <Badge key={topic} variant="secondary" className="text-[9px] px-1.5 py-0">
+                        {topic}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteHistoryEntry(entry.sessionId);
+                  setEntries((prev) => prev.filter((x) => x.sessionId !== entry.sessionId));
+                }}
+                className="absolute right-2 top-3 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                title="Delete"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           );
         })}
       </div>

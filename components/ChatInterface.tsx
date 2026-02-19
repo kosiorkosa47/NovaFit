@@ -428,6 +428,32 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     ]);
   }, []);
 
+  // Persist current messages + history entry (called from ALL flows: agent, scan, meal)
+  const persistCurrentSession = useCallback(() => {
+    setMessages((current) => {
+      const userMsgs = current.filter((m) => m.role === "user");
+      if (userMsgs.length > 0) {
+        const firstUserMsg = userMsgs[0].content;
+        const topics: string[] = [];
+        if (current.some((m) => m.plan)) topics.push("plan");
+        if (current.some((m) => m.scanResult)) topics.push("scan");
+        if (current.some((m) => m.mealResult)) topics.push("meal");
+        if (current.some((m) => m.content.toLowerCase().includes("exercise") || m.content.toLowerCase().includes("ćwicz"))) topics.push("exercise");
+        if (current.some((m) => m.content.toLowerCase().includes("diet") || m.content.toLowerCase().includes("dieta"))) topics.push("diet");
+
+        saveHistoryEntry({
+          sessionId,
+          timestamp: new Date().toISOString(),
+          firstMessage: firstUserMsg.slice(0, 100),
+          messageCount: current.length,
+          topics: topics.slice(0, 4),
+        });
+        persistMessages(sessionId, current);
+      }
+      return current;
+    });
+  }, [sessionId]);
+
   const handleStreamResponse = useCallback(
     async (response: Response) => {
       const reader = response.body?.getReader();
@@ -547,6 +573,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
       } finally {
         setStatusLabel(null);
         setIsStreaming(false);
+        persistCurrentSession();
       }
       return;
     }
@@ -609,7 +636,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
           healthData,
           recentMeals,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          locale: navigator.language,
+          locale: getLang() === "pl" ? "pl-PL" : "en-US",
+          appLanguage: getLang(),
           timeOfDay,
           dayOfWeek: days[now.getDay()],
         };
@@ -671,35 +699,9 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     } finally {
       setStatusLabel(null);
       setIsStreaming(false);
-
-      // Save to conversation history — use functional update to access latest messages
-      setMessages((current) => {
-        const userMsgs = current.filter((m) => m.role === "user");
-        if (userMsgs.length > 0) {
-          const firstUserMsg = userMsgs[0].content;
-          const topics: string[] = [];
-          if (current.some((m) => m.plan)) topics.push("plan");
-          if (current.some((m) => m.scanResult)) topics.push("scan");
-          if (current.some((m) => m.mealResult)) topics.push("meal");
-          if (current.some((m) => m.content.toLowerCase().includes("exercise") || m.content.toLowerCase().includes("ćwicz"))) topics.push("exercise");
-          if (current.some((m) => m.content.toLowerCase().includes("diet") || m.content.toLowerCase().includes("dieta"))) topics.push("diet");
-
-          saveHistoryEntry({
-            sessionId,
-            timestamp: new Date().toISOString(),
-            firstMessage: firstUserMsg.slice(0, 100),
-            messageCount: current.length,
-            topics: topics.slice(0, 4),
-          });
-
-          // Explicitly persist messages alongside history entry (belt & suspenders)
-          persistMessages(sessionId, current);
-          console.log("[ChatInterface] Persisted", current.length, "messages for session", sessionId);
-        }
-        return current;
-      });
+      persistCurrentSession();
     }
-  }, [addAssistantMessage, handleStreamResponse, hasStarted, input, isStreaming, sessionId, pendingImage, pendingImagePreview, resetInactivityTimer]);
+  }, [addAssistantMessage, handleStreamResponse, hasStarted, input, isStreaming, sessionId, pendingImage, pendingImagePreview, resetInactivityTimer, persistCurrentSession]);
 
   const handleScanUpload = useCallback(async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -775,8 +777,9 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     } finally {
       setStatusLabel(null);
       setIsStreaming(false);
+      persistCurrentSession();
     }
-  }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer]);
+  }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer, persistCurrentSession]);
 
   const handleMealUpload = useCallback(async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -863,8 +866,9 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     } finally {
       setStatusLabel(null);
       setIsStreaming(false);
+      persistCurrentSession();
     }
-  }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer]);
+  }, [addAssistantMessage, hasStarted, speakText, startInactivityTimer, persistCurrentSession]);
 
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {

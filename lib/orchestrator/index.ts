@@ -49,7 +49,10 @@ function formatUserContext(ctx?: UserContext): string {
   if (ctx.name) parts.push(`User's name: ${ctx.name}`);
   if (ctx.timeOfDay) parts.push(`Current time of day: ${ctx.timeOfDay}`);
   if (ctx.dayOfWeek) parts.push(`Day: ${ctx.dayOfWeek}`);
-  if (ctx.locale) parts.push(`Device locale (for reference only — always reply in the language the user WRITES in): ${ctx.locale}`);
+  if (ctx.appLanguage) {
+    const langName = ctx.appLanguage === "pl" ? "Polish" : "English";
+    parts.push(`IMPORTANT — App language selected by user: ${langName}. Reply in ${langName} unless the user's current message is clearly written in a different language.`);
+  }
   if (ctx.goals) {
     const g = ctx.goals;
     const goalParts: string[] = [];

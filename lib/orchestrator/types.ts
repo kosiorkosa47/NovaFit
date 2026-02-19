@@ -73,6 +73,7 @@ export interface UserContext {
   }[];
   timezone?: string;
   locale?: string;
+  appLanguage?: string;
   timeOfDay?: string;
   dayOfWeek?: string;
 }
