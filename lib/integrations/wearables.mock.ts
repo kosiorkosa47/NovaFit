@@ -39,13 +39,20 @@ export async function getWearableSnapshot(sessionId: string): Promise<WearableSn
   };
 }
 
-export function formatWearableForPrompt(snapshot: WearableSnapshot): string {
+export function formatWearableForPrompt(snapshot: WearableSnapshot, sensorSource?: string): string {
+  const sourceNote = sensorSource === "android-sensors"
+    ? "(from phone sensors — may be incomplete if app was just opened)"
+    : sensorSource === "mock"
+    ? "(estimated/simulated — not from real sensors)"
+    : "(from sensors)";
+
   return [
-    `Steps today: ${snapshot.steps}`,
-    `Average heart rate: ${snapshot.averageHeartRate} bpm`,
-    `Resting heart rate: ${snapshot.restingHeartRate} bpm`,
-    `Sleep last night: ${snapshot.sleepHours}h`,
-    `Stress level: ${snapshot.stressLevel}`,
-    `Captured at: ${snapshot.capturedAt}`
+    `Sensor data ${sourceNote}:`,
+    `  Steps today: ${snapshot.steps}${snapshot.steps === 0 ? " (sensor may not have started tracking yet)" : ""}`,
+    `  Average heart rate: ${snapshot.averageHeartRate} bpm`,
+    `  Resting heart rate: ${snapshot.restingHeartRate} bpm`,
+    `  Sleep last night: ${snapshot.sleepHours}h (estimated — phone cannot accurately measure sleep)`,
+    `  Stress level: ${snapshot.stressLevel}`,
+    `NOTE: If the user explicitly states different values (e.g., "I slept 5 hours"), trust the user over this sensor data.`
   ].join("\n");
 }

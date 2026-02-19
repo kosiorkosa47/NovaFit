@@ -66,13 +66,27 @@ export async function getAvailableSensors(): Promise<string[]> {
   return sensors;
 }
 
+/** Check if user wants mock wearable data (from Settings toggle) */
+function isMockWearableEnabled(): boolean {
+  if (typeof window === "undefined") return true;
+  const saved = localStorage.getItem("nova-mock-wearable");
+  return saved === null || saved === "true"; // default ON
+}
+
 /** Get health data from the best available source */
 export async function getHealthData(): Promise<HealthData> {
   // 1. Try native Capacitor plugin
   if (isNativeApp()) {
     try {
       const data = await Capacitor!.Plugins?.HealthSensors?.getHealthData();
-      if (data) return data;
+      if (data) {
+        // If mock wearable is ON and native data looks empty, enrich with mock
+        if (isMockWearableEnabled() && data.steps === 0) {
+          const mock = getMockHealthData();
+          return { ...mock, source: "android-sensors" };
+        }
+        return data;
+      }
     } catch (e) {
       console.warn("Native health data failed:", e);
     }

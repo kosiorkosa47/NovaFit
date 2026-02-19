@@ -159,9 +159,9 @@ export function AgentReasoningPanel({ agentLabel, payload }: { agentLabel?: stri
       <button
         type="button"
         onClick={() => setExpanded(v => !v)}
-        className="flex items-center gap-0.5 text-[9px] font-medium text-emerald-600/70 transition-colors hover:text-emerald-600 dark:text-emerald-400/70 dark:hover:text-emerald-400"
+        className="flex min-h-[36px] items-center gap-1 rounded-lg px-1.5 text-[11px] font-medium text-emerald-600/70 transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 active:bg-emerald-500/20 dark:text-emerald-400/70 dark:hover:text-emerald-400"
       >
-        {expanded ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         {expanded ? "Hide reasoning" : "Show reasoning"}
       </button>
       {expanded && (

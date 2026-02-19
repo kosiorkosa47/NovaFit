@@ -54,6 +54,7 @@ export interface AnalyzerInput {
   message: string;
   feedback?: string;
   wearable: WearableSnapshot;
+  sensorSource?: string;
   history: ChatMessage[];
   adaptationNotes: string[];
   userFacts: string[];
@@ -69,7 +70,7 @@ export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; 
     `User message: ${input.message}`,
     input.imageData ? "[The user also attached a photo. Describe what you see and incorporate it into your health analysis.]" : "",
     input.feedback ? `User feedback on previous plan: ${input.feedback}` : "",
-    `\nWearable data:\n${formatWearableForPrompt(input.wearable)}`,
+    `\nWearable data:\n${formatWearableForPrompt(input.wearable, input.sensorSource)}`,
     `\nRecent conversation:\n${historyToPrompt(input.history)}`,
     input.adaptationNotes.length
       ? `\nAdaptation notes from previous interactions:\n- ${input.adaptationNotes.join("\n- ")}`

@@ -130,11 +130,13 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     // Step 2: Analyzer Agent + Nutritionix in parallel (saves 2-5s)
     input.onEvent?.({ type: "status", message: "Analyzing your current state..." });
 
+    const sensorSource = input.userContext?.healthData?.source ?? "mock";
     const [analyzerResult, nutritionContext] = await Promise.all([
       runAnalyzer({
         message,
         feedback,
         wearable,
+        sensorSource,
         history,
         adaptationNotes,
         userFacts,

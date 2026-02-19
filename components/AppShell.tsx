@@ -10,6 +10,7 @@ import { HistoryPage } from "@/components/HistoryPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { ProfilePage } from "@/components/ProfilePage";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { startWebStepTracking } from "@/lib/sensors/health-bridge";
 
 const MIGRATION_FLAG = "nova-health-data-migrated";
 
@@ -18,6 +19,9 @@ export function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [voiceOutput, setVoiceOutput] = useState(true);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>();
+
+  // Start step tracking on app load (web accelerometer fallback)
+  useEffect(() => { startWebStepTracking(); }, []);
 
   // Populate localStorage profile from Google session data (first login)
   useEffect(() => {
