@@ -3,6 +3,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelWithBidirectionalStreamCommand,
 } from "@aws-sdk/client-bedrock-runtime";
+import { NodeHttp2Handler } from "@smithy/node-http-handler";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 
@@ -55,6 +56,12 @@ export async function POST(request: Request): Promise<Response> {
 
     const client = new BedrockRuntimeClient({
       region: process.env.AWS_REGION ?? "us-east-1",
+      requestHandler: new NodeHttp2Handler({
+        requestTimeout: 180_000,
+        sessionTimeout: 180_000,
+        disableConcurrentStreams: false,
+        maxConcurrentStreams: 20,
+      }),
     });
 
     const systemPrompt = body.systemPrompt ??
@@ -85,10 +92,10 @@ export async function POST(request: Request): Promise<Response> {
             textOutputConfiguration: { mediaType: "text/plain" },
             audioOutputConfiguration: {
               mediaType: "audio/lpcm",
-              sampleRateHertz: sampleRate,
+              sampleRateHertz: 24000,
               sampleSizeBits: 16,
               channelCount: 1,
-              voiceId: "matthew",
+              voiceId: "tiffany",
               encoding: "base64",
               audioType: "SPEECH",
             },
@@ -233,7 +240,7 @@ export async function POST(request: Request): Promise<Response> {
       transcript: userTranscript,
       text: assistantText,
       audioBase64: combinedAudio,
-      sampleRate,
+      sampleRate: 24000,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
