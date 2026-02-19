@@ -231,6 +231,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Initialize session + lang
   useEffect(() => {
@@ -809,6 +810,18 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     setPendingImagePreview(null);
   }, []);
 
+  // Close camera menu on outside click
+  useEffect(() => {
+    if (!showCameraMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (cameraMenuRef.current && !cameraMenuRef.current.contains(e.target as Node)) {
+        setShowCameraMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showCameraMenu]);
+
   // Keep sendMessage ref fresh so voice callback always uses latest version
   const sendMessageRef = useRef(sendMessage);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
@@ -946,7 +959,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
         <div className="mx-auto flex max-w-2xl items-end gap-1.5">
           <VoiceButton onTranscript={handleVoiceTranscript} disabled={isStreaming} />
 
-          <div className="relative">
+          <div className="relative" ref={cameraMenuRef}>
             <button
               type="button"
               disabled={isStreaming}
@@ -964,7 +977,13 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                     setShowCameraMenu(false);
                     if (isNative()) {
                       const file = await takeNativePhoto();
-                      if (file) void handleMealUpload(file);
+                      if (file) {
+                        void handleMealUpload(file);
+                      } else {
+                        // Native camera failed or cancelled — fall back to file picker
+                        setCameraMode("meal");
+                        fileInputRef.current?.click();
+                      }
                     } else {
                       setCameraMode("meal");
                       fileInputRef.current?.click();
@@ -981,7 +1000,12 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                     setShowCameraMenu(false);
                     if (isNative()) {
                       const file = await takeNativePhoto();
-                      if (file) void handleScanUpload(file);
+                      if (file) {
+                        void handleScanUpload(file);
+                      } else {
+                        setCameraMode("label");
+                        fileInputRef.current?.click();
+                      }
                     } else {
                       setCameraMode("label");
                       fileInputRef.current?.click();
@@ -1002,6 +1026,9 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                         setPendingImage(file);
                         setPendingImagePreview(URL.createObjectURL(file));
                         textareaRef.current?.focus();
+                      } else {
+                        // Fall back to file picker when native camera unavailable
+                        imageInputRef.current?.click();
                       }
                     } else {
                       imageInputRef.current?.click();
