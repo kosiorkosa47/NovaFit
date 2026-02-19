@@ -256,6 +256,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   }
 
   addAdaptationNote(input.sessionId, monitor.adaptationNote);
+  addAdaptationNote(input.sessionId, `Previous energy score: ${analyzer.energyScore}/100 — maintain consistency unless user reports significant change`);
 
   // Extract user facts from adaptation notes (simple heuristic)
   if (monitor.adaptationNote.toLowerCase().includes("allerg")) {
