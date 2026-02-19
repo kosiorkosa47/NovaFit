@@ -86,16 +86,24 @@ function persistMessages(sessionId: string, messages: UiMessage[]) {
       ...m,
       imagePreview: undefined, // blob URLs don't survive reload
     }));
-    localStorage.setItem(MESSAGES_STORAGE_PREFIX + sessionId, JSON.stringify(serializable));
-  } catch { /* storage full — ignore */ }
+    const key = MESSAGES_STORAGE_PREFIX + sessionId;
+    localStorage.setItem(key, JSON.stringify(serializable));
+    console.log("[persist]", key, "→", serializable.length, "msgs");
+  } catch (e) {
+    console.warn("[persist] FAILED:", e);
+  }
 }
 
 /** Load saved messages for a session */
 function loadMessages(sessionId: string): UiMessage[] {
   try {
-    const raw = localStorage.getItem(MESSAGES_STORAGE_PREFIX + sessionId);
-    return raw ? (JSON.parse(raw) as UiMessage[]) : [];
-  } catch {
+    const key = MESSAGES_STORAGE_PREFIX + sessionId;
+    const raw = localStorage.getItem(key);
+    const result = raw ? (JSON.parse(raw) as UiMessage[]) : [];
+    console.log("[loadMessages]", key, "→", result.length, "msgs", raw ? "(found)" : "(empty)");
+    return result;
+  } catch (e) {
+    console.warn("[loadMessages] FAILED:", e);
     return [];
   }
 }
@@ -240,9 +248,11 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     // Strip timestamp suffix appended by AppShell (format: "sessionId:timestamp")
     const lastColon = loadSessionId.lastIndexOf(":");
     const sid = lastColon > 0 ? loadSessionId.substring(0, lastColon) : loadSessionId;
+    console.log("[ChatInterface] loadSessionId changed:", loadSessionId, "→ sid:", sid);
     setSessionId(sid);
     window.localStorage.setItem(SESSION_STORAGE_KEY, sid);
     const saved = loadMessages(sid);
+    console.log("[ChatInterface] Loaded messages for", sid, "→", saved.length, "messages");
     if (saved.length > 0) {
       setMessages(saved);
       setHasStarted(true);
@@ -504,7 +514,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
       setStatusLabel(null);
       setIsStreaming(false);
 
-      // Save to conversation history
+      // Save to conversation history — use functional update to access latest messages
       setMessages((current) => {
         const userMsgs = current.filter((m) => m.role === "user");
         if (userMsgs.length > 0) {
@@ -523,6 +533,10 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
             messageCount: current.length,
             topics: topics.slice(0, 4),
           });
+
+          // Explicitly persist messages alongside history entry (belt & suspenders)
+          persistMessages(sessionId, current);
+          console.log("[ChatInterface] Persisted", current.length, "messages for session", sessionId);
         }
         return current;
       });

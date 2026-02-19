@@ -52,9 +52,12 @@ export function AppShell() {
   }, []);
 
   const switchToChat = useCallback((sessionId?: string) => {
+    console.log("[AppShell] switchToChat called with:", sessionId);
     if (sessionId) {
       // Use unique string each time to force useEffect even if same sessionId
-      setChatSessionId(sessionId + ":" + Date.now());
+      const newId = sessionId + ":" + Date.now();
+      console.log("[AppShell] Setting chatSessionId to:", newId);
+      setChatSessionId(newId);
     }
     setActiveTab("chat");
   }, []);
