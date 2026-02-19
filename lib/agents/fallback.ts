@@ -348,13 +348,23 @@ export function generateFallbackPlan(message: string, analyzer: AnalyzerResult):
   };
 }
 
-export function generateFallbackMonitor(message: string, analyzer: AnalyzerResult, _plan: PlanRecommendation): MonitorResult {
+export function generateFallbackMonitor(message: string, analyzer: AnalyzerResult, _plan: PlanRecommendation, userName?: string): MonitorResult {
   const topics = detectTopics(message);
   const primary = topics[0];
   const template = TOPIC_RESPONSES[primary] ?? TOPIC_RESPONSES.general;
 
+  // Personalize reply with user name if available
+  let reply = template.reply;
+  if (userName) {
+    // Insert name naturally after first sentence or greeting
+    const firstPeriod = reply.indexOf(". ");
+    if (firstPeriod > 0 && firstPeriod < 60) {
+      reply = reply.slice(0, firstPeriod + 2) + `${userName}, ` + reply.slice(firstPeriod + 2, firstPeriod + 3).toLowerCase() + reply.slice(firstPeriod + 3);
+    }
+  }
+
   return {
-    reply: template.reply,
+    reply,
     tone: analyzer.energyScore > 60 ? "encouraging" : "empathetic",
     feedbackPrompt: template.feedbackPrompt,
     adaptationNote: `Fallback mode — topics: ${topics.join(", ")}. Energy: ${analyzer.energyScore}/100. Revisit with Nova when quota resets.`

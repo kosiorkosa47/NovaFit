@@ -95,6 +95,7 @@ const translations = {
 
   // Detail panel
   "goal": { en: "Goal", pl: "Cel" },
+  "target": { en: "Target", pl: "Cel" },
   "progress": { en: "Progress", pl: "Postęp" },
   "hourly": { en: "Hourly Breakdown", pl: "Rozkład godzinowy" },
   "tips": { en: "Tips", pl: "Wskazówki" },

@@ -75,7 +75,7 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
       setIsPlaying(true);
       const audioBytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
       const samples = new Float32Array(audioBytes.length / 2);
-      const view = new DataView(audioBytes.buffer);
+      const view = new DataView(audioBytes.buffer, audioBytes.byteOffset, audioBytes.byteLength);
       for (let i = 0; i < samples.length; i++) {
         samples[i] = view.getInt16(i * 2, true) / 32768;
       }
@@ -207,9 +207,8 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
             const transcript = event.results?.[0]?.[0]?.transcript?.trim();
             console.log("[voice] Browser STT result:", transcript);
             if (transcript) {
+              // Save as fallback — Nova Sonic result is preferred when available
               sttResultRef.current = transcript;
-              // Send immediately via ref (always latest callback)
-              emitTranscript(transcript);
             }
           };
           recognition.onend = () => { /* no-op */ };
@@ -245,8 +244,19 @@ export function VoiceButton({ onTranscript, size = "default", disabled = false }
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         console.log("[voice] Recording stopped, blob size:", blob.size, "chunks:", chunksRef.current.length);
         if (blob.size > 0) {
-          // Use ref to always get latest sendToNovaSonic
+          // Send to Nova Sonic (preferred STT) — browser STT is fallback
           void sendToNovaSonicRef.current(blob);
+
+          // Safety net: if Nova Sonic takes too long, use browser STT result
+          setTimeout(() => {
+            if (!transcriptSentRef.current && sttResultRef.current) {
+              console.log("[voice] Nova Sonic timeout — using browser STT fallback");
+              emitTranscript(sttResultRef.current);
+            }
+          }, 8000);
+        } else if (sttResultRef.current) {
+          // No audio recorded but browser STT got something
+          emitTranscript(sttResultRef.current);
         }
       };
 

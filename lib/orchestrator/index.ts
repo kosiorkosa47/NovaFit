@@ -239,7 +239,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     });
 
     input.onEvent?.({ type: "status", message: "Composing your coaching response..." });
-    monitor = generateFallbackMonitor(message, analyzer, plan);
+    monitor = generateFallbackMonitor(message, analyzer, plan, input.userContext?.name);
     monitorRaw = JSON.stringify(monitor);
 
     input.onEvent?.({

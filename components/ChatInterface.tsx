@@ -321,7 +321,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     try {
       const audioBytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
       const samples = new Float32Array(audioBytes.length / 2);
-      const view = new DataView(audioBytes.buffer);
+      const view = new DataView(audioBytes.buffer, audioBytes.byteOffset, audioBytes.byteLength);
       for (let i = 0; i < samples.length; i++) {
         samples[i] = view.getInt16(i * 2, true) / 32768;
       }

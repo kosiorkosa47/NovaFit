@@ -78,6 +78,7 @@ interface MetricDetail {
   tips: string[];
   color: string;
   bgColor: string;
+  invertProgress?: boolean;
 }
 
 function ExpandableMetricCard({
@@ -142,18 +143,36 @@ function ExpandableMetricCard({
           <div className="mb-4">
             <div className="mb-1 flex items-center gap-1.5">
               <Target className="h-3.5 w-3.5 text-muted-foreground/60" />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">{t("goal", lang)}</span>
-            </div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm font-medium">{value} / {detail.goal.toLocaleString()} {detail.unit}</span>
-              <span className={cn("text-xs font-semibold", progressColor(Math.round((Number(String(value).replace(/,/g, "")) / detail.goal) * 100)))}>
-                {Math.min(100, Math.round((Number(String(value).replace(/,/g, "")) / detail.goal) * 100))}%
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                {detail.invertProgress ? t("target", lang) : t("goal", lang)}
               </span>
             </div>
-            <Progress
-              value={Math.min(100, (Number(String(value).replace(/,/g, "")) / detail.goal) * 100)}
-              className={cn("mt-1.5 h-2.5 rounded-full", progressBarClass(Math.round((Number(String(value).replace(/,/g, "")) / detail.goal) * 100)))}
-            />
+            {(() => {
+              const numVal = Number(String(value).replace(/,/g, ""));
+              let pct: number;
+              if (detail.invertProgress) {
+                // Lower is better: at/below goal = 100%, double goal = 0%
+                pct = numVal <= detail.goal ? 100 : Math.max(0, 100 - ((numVal - detail.goal) / detail.goal) * 100);
+              } else {
+                pct = Math.min(100, Math.round((numVal / detail.goal) * 100));
+              }
+              return (
+                <>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm font-medium">
+                      {value} {detail.invertProgress ? `(${detail.invertProgress ? (numVal <= detail.goal ? "good" : "high") : ""})` : `/ ${detail.goal.toLocaleString()}`} {detail.unit}
+                    </span>
+                    <span className={cn("text-xs font-semibold", progressColor(Math.round(pct)))}>
+                      {Math.round(pct)}%
+                    </span>
+                  </div>
+                  <Progress
+                    value={pct}
+                    className={cn("mt-1.5 h-2.5 rounded-full", progressBarClass(Math.round(pct)))}
+                  />
+                </>
+              );
+            })()}
           </div>
 
           {/* Weekly mini chart */}
@@ -506,7 +525,7 @@ export function DashboardPage() {
               label={t("heart_rate", lang)} value={health.heartRate ?? "—"} unit="bpm"
               color="bg-rose-100 dark:bg-rose-900/60" trend={hrTrend}
               expanded={expandedCard === "heart_rate"} onToggle={() => toggleCard("heart_rate")} lang={lang}
-              detail={{ goal: 70, unit: "bpm", weekData: hrWeek, tips: getTips("heart_rate", lang), color: "bg-rose-400", bgColor: "bg-rose-50" }}
+              detail={{ goal: 80, unit: "bpm", weekData: hrWeek, tips: getTips("heart_rate", lang), color: "bg-rose-400", bgColor: "bg-rose-50", invertProgress: true }}
             />
           )}
           {(!expandedCard || expandedCard === "sleep") && (
@@ -537,7 +556,7 @@ export function DashboardPage() {
               label={t("distance", lang)} value={(health.distance / 1000).toFixed(1)} unit="km"
               color="bg-sky-100 dark:bg-sky-900/60"
               expanded={expandedCard === "distance"} onToggle={() => toggleCard("distance")} lang={lang}
-              detail={{ goal: 5000, unit: "m", weekData: distanceWeek, tips: getTips("distance", lang), color: "bg-sky-500", bgColor: "bg-sky-50" }}
+              detail={{ goal: 5, unit: "km", weekData: distanceWeek.map(d => Number((d / 1000).toFixed(1))), tips: getTips("distance", lang), color: "bg-sky-500", bgColor: "bg-sky-50" }}
             />
           )}
           {(!expandedCard || expandedCard === "stress") && (
@@ -546,7 +565,7 @@ export function DashboardPage() {
               label={t("stress", lang)} value={health.stress} unit="/100"
               color="bg-amber-100 dark:bg-amber-900/60"
               expanded={expandedCard === "stress"} onToggle={() => toggleCard("stress")} lang={lang}
-              detail={{ goal: 30, unit: "", weekData: stressWeek, tips: getTips("stress", lang), color: "bg-amber-400", bgColor: "bg-amber-50" }}
+              detail={{ goal: 40, unit: "/100", weekData: stressWeek, tips: getTips("stress", lang), color: "bg-amber-400", bgColor: "bg-amber-50", invertProgress: true }}
             />
           )}
         </div>
