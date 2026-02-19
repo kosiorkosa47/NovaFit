@@ -16,7 +16,7 @@ import { log } from "@/lib/utils/logging";
 const DEFAULT_MODEL_ID_LITE = "us.amazon.nova-2-lite-v1:0";
 const DEFAULT_MODEL_ID_SONIC = "us.amazon.nova-2-sonic-v1:0";
 const LEGACY_MODEL_ID_SONIC = "amazon.nova-lite-v1:0";
-const DEFAULT_TIMEOUT_MS = 12_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 export interface InvokeOptions {
   systemPrompt: string;
@@ -160,7 +160,7 @@ export async function invokeWithTools(
     { role: "user", content: userContent },
   ];
 
-  const MAX_TOOL_ROUNDS = 3;
+  const MAX_TOOL_ROUNDS = 2;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const controller = new AbortController();

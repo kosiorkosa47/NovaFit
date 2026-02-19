@@ -15,6 +15,7 @@ import { requireAuth } from "@/lib/auth/helpers";
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const requestSchema = z.object({
   sessionId: z.string().min(8).max(80),

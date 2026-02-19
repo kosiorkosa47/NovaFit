@@ -6,6 +6,7 @@ import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { requireAuth } from "@/lib/auth/helpers";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 

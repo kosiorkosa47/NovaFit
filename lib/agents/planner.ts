@@ -1,9 +1,10 @@
-import { invokeWithTools } from "@/lib/bedrock/invoke";
+import { invokeNovaLite, invokeWithTools } from "@/lib/bedrock/invoke";
 import { AGENT_TOOLS, executeTool } from "@/lib/bedrock/tools";
 import type { AnalyzerResult, PlanRecommendation } from "@/lib/orchestrator/types";
 import { PLANNER_SYSTEM_PROMPT } from "@/lib/orchestrator/prompts";
 import type { ChatMessage } from "@/lib/session/session.types";
 import { logAgentStart, logAgentDone, logAgentError } from "@/lib/utils/logging";
+import { log } from "@/lib/utils/logging";
 
 function extractJsonObject(raw: string): Record<string, unknown> | null {
   try {
@@ -86,15 +87,28 @@ export async function runPlanner(input: PlannerInput): Promise<{ raw: string; pa
     .join("\n");
 
   try {
-    const result = await invokeWithTools({
-      systemPrompt: PLANNER_SYSTEM_PROMPT,
-      userPrompt,
-      history: input.history,
-      maxTokens: 600,
-      temperature: 0.35,
-      tools: AGENT_TOOLS,
-      onToolUse: (name, toolInput) => executeTool(name, toolInput, input.sessionId),
-    });
+    // Try with tool calling first — falls back to plain invoke on timeout
+    let result;
+    try {
+      result = await invokeWithTools({
+        systemPrompt: PLANNER_SYSTEM_PROMPT,
+        userPrompt,
+        history: input.history,
+        maxTokens: 600,
+        temperature: 0.35,
+        tools: AGENT_TOOLS,
+        onToolUse: (name, toolInput) => executeTool(name, toolInput, input.sessionId),
+      });
+    } catch (toolError) {
+      log({ level: "warn", agent: "Planner", message: `Tool calling failed, falling back to plain invoke: ${toolError instanceof Error ? toolError.message : "unknown"}` });
+      result = await invokeNovaLite({
+        systemPrompt: PLANNER_SYSTEM_PROMPT,
+        userPrompt,
+        history: input.history,
+        maxTokens: 600,
+        temperature: 0.35,
+      });
+    }
 
     const parsed = parsePlanResult(result.text, input.nutritionContext);
     logAgentDone("Planner", startTime, input.sessionId);

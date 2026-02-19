@@ -14,6 +14,7 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_TEXT_LENGTH = 5000;
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 export interface ScanResponse {
   success: boolean;
