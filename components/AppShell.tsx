@@ -144,13 +144,14 @@ export function AppShell() {
         <div className="flex items-center gap-2">
           <button
             onClick={startNewChat}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 text-emerald-700 transition-colors hover:bg-emerald-500/20 active:scale-95 dark:text-emerald-400"
             title="New chat"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z" />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
+            <span className="text-xs font-medium">New</span>
           </button>
           <ThemeToggle />
           {session?.user && (
