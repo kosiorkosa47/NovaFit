@@ -99,10 +99,26 @@ export async function POST(request: Request): Promise<Response> {
               },
             },
             {
-              text: `You are an expert nutritionist AI. Analyze this meal photo and provide a detailed nutritional breakdown.
+              text: `You are an expert nutritionist AI. Analyze this photo and provide a detailed nutritional breakdown.
 
-Return ONLY a valid JSON object (no markdown, no code blocks) with this exact structure:
+CRITICAL FIRST STEP: Determine if the image shows ACTUAL FOOD or BEVERAGE meant for human consumption.
+
+If the image shows a NON-FOOD product (cleaning supplies, chemicals, compressed air, spray cans, medications, cosmetics, pet food, industrial products, supplements without food context, or ANYTHING not meant to be eaten as a meal), return:
 {
+  "isFood": false,
+  "foods": [],
+  "totalCalories": 0,
+  "totalProtein": 0,
+  "totalCarbs": 0,
+  "totalFat": 0,
+  "healthScore": 0,
+  "summary": "⚠️ WARNING: This is NOT food. [Identify what the product actually is]. This product is not meant for human consumption and could be dangerous if ingested. Please only scan actual food and beverages.",
+  "suggestions": ["This is not a food product — do not consume", "If accidentally ingested, contact poison control or emergency services"]
+}
+
+If the image DOES show food/beverage, return:
+{
+  "isFood": true,
   "foods": [
     {
       "name": "food item name",
@@ -122,13 +138,15 @@ Return ONLY a valid JSON object (no markdown, no code blocks) with this exact st
   "suggestions": ["suggestion 1 for improvement", "suggestion 2"]
 }
 
-Guidelines:
+Guidelines for food:
 - Identify ALL visible food items
 - Estimate realistic portion sizes
 - Provide accurate calorie and macro estimates
 - healthScore: 0-100 (100 = very healthy)
 - Give 2-3 practical suggestions to make this meal healthier
-- Be specific about food items, not generic`,
+- Be specific about food items, not generic
+
+Return ONLY valid JSON, no markdown, no code blocks.`,
             },
           ],
         },

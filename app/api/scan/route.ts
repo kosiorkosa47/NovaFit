@@ -171,6 +171,21 @@ export async function POST(request: Request): Promise<Response> {
 
     log({ level: "info", agent: "scan", message: `Analyzing ${ingredientsText.length} chars of ingredients` });
 
+    // Check if OCR flagged this as non-food
+    if (ingredientsText.startsWith("NOT_FOOD:")) {
+      const productType = ingredientsText.split("\n")[0].replace("NOT_FOOD:", "").trim();
+      log({ level: "warn", agent: "scan", message: `Non-food product detected: ${productType}` });
+      const response: ScanResponse = {
+        success: true,
+        nutritionFacts: {} as NutritionFacts,
+        warnings: [{ name: "Non-food product", aliases: [], risk: "high" as const, reason: `This appears to be: ${productType}. Not meant for human consumption.`, effects: ["Not safe to ingest", "May cause poisoning or injury"], foundIn: [] }],
+        ingredientsRaw: ingredientsText.slice(0, 2000),
+        healthScore: 0,
+        summary: `⚠️ WARNING: This is NOT a food product. It appears to be: ${productType}. This product is not meant for human consumption and could be dangerous if ingested. Please only scan food and beverage labels.`,
+      };
+      return NextResponse.json(response);
+    }
+
     const nutritionFacts = parseNutritionFacts(ingredientsText);
     const warnings = analyzeIngredients(ingredientsText);
     const healthScore = computeHealthScore(nutritionFacts, warnings);
@@ -229,7 +244,15 @@ async function tryNovaOcr(
               },
             },
             {
-              text: `You are a nutrition label OCR specialist. Extract ALL text from this food product image. Include:
+              text: `You are a product label OCR specialist. Extract ALL text from this product image.
+
+CRITICAL FIRST STEP: Determine if this is a FOOD/BEVERAGE product meant for human consumption.
+
+If this is NOT a food product (cleaning supplies, chemicals, compressed air, spray cans, medications, cosmetics, industrial products, pet food, etc.), return EXACTLY this text on the first line:
+NOT_FOOD: [what the product actually is]
+Then on subsequent lines, extract whatever text is visible on the label.
+
+If this IS a food/beverage product, extract:
 1. ALL ingredients listed (exactly as printed)
 2. ALL Nutrition Facts values (calories, fat, sodium, sugars, protein, etc.)
 3. Any allergen warnings
