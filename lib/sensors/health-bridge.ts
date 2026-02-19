@@ -118,6 +118,19 @@ let isTracking = false;
 let lastMagnitude = 0;
 let stepThreshold = 12; // Calibrated for walking motion
 
+/** Start native step counting (Capacitor plugin) */
+export async function startNativeStepTracking(): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await Capacitor!.Plugins?.HealthSensors?.startStepCounting();
+    console.log("[sensors] Native step counting started");
+    return true;
+  } catch (e) {
+    console.warn("[sensors] Native step counting failed:", e);
+    return false;
+  }
+}
+
 /** Start tracking steps via Web Accelerometer API */
 export function startWebStepTracking(): boolean {
   if (isTracking) return true;
