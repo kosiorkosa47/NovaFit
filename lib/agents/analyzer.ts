@@ -41,6 +41,43 @@ function parseAnalyzerResult(raw: string): AnalyzerResult {
   };
 }
 
+/** Extract user-stated health values from conversation history to override sensor data */
+function extractUserStatedValues(history: ChatMessage[], currentMessage: string): string {
+  const allUserText = [
+    ...history.filter(m => m.role === "user").map(m => m.content),
+    currentMessage
+  ].join(" ").toLowerCase();
+
+  const overrides: string[] = [];
+
+  // Sleep hours
+  const sleepMatch = allUserText.match(/(?:slept|sleep|sleeping)\s+(?:only\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|h\b)/);
+  if (sleepMatch) {
+    overrides.push(`Sleep: User stated ${sleepMatch[1]} hours — use this, NOT sensor data`);
+  }
+
+  // Steps
+  const stepsMatch = allUserText.match(/(\d{1,2}[,.]?\d{3})\s*steps/) ||
+    allUserText.match(/walked\s+(\d+(?:\.\d+)?)\s*km/);
+  if (stepsMatch) {
+    overrides.push(`Activity: User stated ${stepsMatch[0]} — use this, NOT sensor data`);
+  }
+
+  // Pain/discomfort
+  if (allUserText.match(/(?:back|neck|knee|head|shoulder|muscle)\s*(?:hurts?|pain|ache|sore)/)) {
+    overrides.push(`Pain: User mentioned physical discomfort — factor into energy and exercise recommendations`);
+  }
+
+  // Meals/calories
+  const calMatch = allUserText.match(/(\d{3,4})\s*(?:cal|kcal|calories)/);
+  if (calMatch) {
+    overrides.push(`Nutrition: User mentioned ${calMatch[0]} intake`);
+  }
+
+  if (!overrides.length) return "";
+  return `\n⚠️ USER-STATED VALUES (these override sensor data):\n${overrides.map(o => `  • ${o}`).join("\n")}`;
+}
+
 function historyToPrompt(messages: ChatMessage[]): string {
   if (!messages.length) return "No prior conversation in this session.";
 
@@ -68,19 +105,32 @@ export interface AnalyzerInput {
 export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; parsed: AnalyzerResult }> {
   const startTime = logAgentStart("Analyzer", input.sessionId);
 
+  // Build user-stated overrides from conversation history
+  const userStatedOverrides = extractUserStatedValues(input.history, input.message);
+
   const userPrompt = [
-    `User message: ${input.message}`,
+    // 1. Conversation history FIRST — so the model knows what was already discussed
+    input.history.length
+      ? `\nCONVERSATION HISTORY (previous messages in this session):\n${historyToPrompt(input.history)}`
+      : "",
+    // 2. Current message
+    `\nCURRENT USER MESSAGE: ${input.message}`,
     input.imageData ? "[The user also attached a photo. Describe what you see and incorporate it into your health analysis.]" : "",
     input.feedback ? `User feedback on previous plan: ${input.feedback}` : "",
-    `\nWearable data:\n${formatWearableForPrompt(input.wearable, input.sensorSource)}`,
-    `\nRecent conversation:\n${historyToPrompt(input.history)}`,
+    // 3. Sensor data (lower priority than user statements)
+    `\nSensor/wearable data (LOWER priority than user-stated values):\n${formatWearableForPrompt(input.wearable, input.sensorSource)}`,
+    // 4. User-stated overrides — explicit corrections
+    userStatedOverrides,
+    // 5. Context
     input.adaptationNotes.length
       ? `\nAdaptation notes from previous interactions:\n- ${input.adaptationNotes.join("\n- ")}`
       : "",
     input.userFacts.length
       ? `\nKnown user facts:\n- ${input.userFacts.join("\n- ")}`
       : "",
-    input.userContextStr ? `\nUser context:\n${input.userContextStr}` : ""
+    input.userContextStr ? `\nUser context:\n${input.userContextStr}` : "",
+    // 6. FINAL REMINDER — strongest position in prompt
+    `\nFINAL REMINDER: If the user stated specific values in this conversation (e.g., "slept 5 hours", "walked 3000 steps"), you MUST use those values in your analysis, NOT the sensor data. Keep the energy score consistent with your previous assessment unless the user reports something genuinely new and different.`
   ]
     .filter(Boolean)
     .join("\n");

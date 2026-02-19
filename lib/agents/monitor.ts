@@ -51,9 +51,16 @@ export interface MonitorInput {
 export async function runMonitor(input: MonitorInput): Promise<{ raw: string; parsed: MonitorResult }> {
   const startTime = logAgentStart("Monitor", input.sessionId);
 
+  // Build conversation context summary for the monitor
+  const prevUserMsgs = input.history.filter(m => m.role === "user").map(m => m.content);
+  const conversationContext = prevUserMsgs.length
+    ? `\nPREVIOUS MESSAGES FROM USER (reference these naturally):\n${prevUserMsgs.map(m => `- "${m.slice(0, 120)}"`).join("\n")}`
+    : "";
+
   const userPrompt = [
-    `User message: ${input.message}`,
+    `Current user message: ${input.message}`,
     input.feedback ? `User feedback: ${input.feedback}` : "",
+    conversationContext,
     `\nAnalyzer summary: ${input.analyzer.summary}`,
     `Energy score: ${input.analyzer.energyScore}/100`,
     `Key signals: ${input.analyzer.keySignals.join(", ")}`,
@@ -62,7 +69,7 @@ export async function runMonitor(input: MonitorInput): Promise<{ raw: string; pa
     `Exercise: ${input.plan.exercise.slice(0, 2).join("; ")}`,
     `\nRisk flags: ${input.analyzer.riskFlags.join(" | ")}`,
     input.userContextStr ? `\nUser context:\n${input.userContextStr}` : "",
-    "\nCompose a warm, natural response. End with one brief feedback question."
+    "\nCompose a warm, natural response. If the user mentioned things in previous messages (sleep hours, exercise, pain), reference them naturally to show you remember. End with one brief feedback question."
   ]
     .filter(Boolean)
     .join("\n");
