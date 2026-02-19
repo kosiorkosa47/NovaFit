@@ -9,10 +9,20 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "demo:judge": "node scripts/judge-demo.mjs",
-    "demo:sse": "node scripts/sse-demo.mjs"
+    "demo:sse": "node scripts/sse-demo.mjs",
+    "cap:sync": "npx cap sync android",
+    "cap:build": "cd android && ./gradlew assembleDebug",
+    "cap:apk": "npm run cap:sync && npm run cap:build"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.990.0",
+    "@capacitor/android": "^8.1.0",
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/haptics": "^8.0.0",
+    "@capacitor/motion": "^8.0.0",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.1",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-progress": "^1.1.8",
