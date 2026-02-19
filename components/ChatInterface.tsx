@@ -220,8 +220,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const [statusLabel, setStatusLabel] = useState<string | null>(null);
   const [showTurnPrompt, setShowTurnPrompt] = useState(false);
 
-  const [cameraMode, setCameraMode] = useState<"label" | "meal" | null>(null);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
+  const cameraModeRef = useRef<"label" | "meal">("meal");
   const [lang, setLangState] = useState<Lang>("en");
   const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
@@ -837,17 +837,17 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      console.log("[chat] handleFileInputChange:", file ? `${file.name} (${file.type}, ${(file.size / 1024).toFixed(0)} KB)` : "no file", "mode:", cameraModeRef.current);
       if (file) {
-        if (cameraMode === "meal") {
+        if (cameraModeRef.current === "meal") {
           void handleMealUpload(file);
         } else {
           void handleScanUpload(file);
         }
       }
       e.target.value = "";
-      setCameraMode(null);
     },
-    [handleScanUpload, handleMealUpload, cameraMode]
+    [handleScanUpload, handleMealUpload]
   );
 
   const handleImageAttach = useCallback(
@@ -1031,21 +1031,10 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
               <div className="absolute bottom-full left-0 mb-2 w-48 overflow-hidden rounded-xl border border-white/40 bg-white/90 shadow-lg backdrop-blur-xl dark:border-emerald-800/30 dark:bg-emerald-950/90">
                 <button
                   type="button"
-                  onClick={async () => {
+                  onClick={() => {
                     setShowCameraMenu(false);
-                    if (isNative()) {
-                      const file = await takeNativePhoto();
-                      if (file) {
-                        void handleMealUpload(file);
-                      } else {
-                        // Native camera failed or cancelled — fall back to file picker
-                        setCameraMode("meal");
-                        fileInputRef.current?.click();
-                      }
-                    } else {
-                      setCameraMode("meal");
-                      fileInputRef.current?.click();
-                    }
+                    cameraModeRef.current = "meal";
+                    fileInputRef.current?.click();
                   }}
                   className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/40"
                 >
@@ -1054,20 +1043,10 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
+                  onClick={() => {
                     setShowCameraMenu(false);
-                    if (isNative()) {
-                      const file = await takeNativePhoto();
-                      if (file) {
-                        void handleScanUpload(file);
-                      } else {
-                        setCameraMode("label");
-                        fileInputRef.current?.click();
-                      }
-                    } else {
-                      setCameraMode("label");
-                      fileInputRef.current?.click();
-                    }
+                    cameraModeRef.current = "label";
+                    fileInputRef.current?.click();
                   }}
                   className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
                 >
@@ -1076,21 +1055,9 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
+                  onClick={() => {
                     setShowCameraMenu(false);
-                    if (isNative()) {
-                      const file = await takeNativePhoto();
-                      if (file) {
-                        setPendingImage(file);
-                        setPendingImagePreview(URL.createObjectURL(file));
-                        textareaRef.current?.focus();
-                      } else {
-                        // Fall back to file picker when native camera unavailable
-                        imageInputRef.current?.click();
-                      }
-                    } else {
-                      imageInputRef.current?.click();
-                    }
+                    imageInputRef.current?.click();
                   }}
                   className="flex w-full items-center gap-2.5 border-t border-white/20 px-3 py-2.5 text-left text-sm hover:bg-emerald-50 dark:border-emerald-800/20 dark:hover:bg-emerald-900/40"
                 >
@@ -1105,14 +1072,14 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
             type="file"
             accept="image/*"
             onChange={handleFileInputChange}
-            className="hidden"
+            className="sr-only"
           />
           <input
             ref={imageInputRef}
             type="file"
             accept="image/*"
             onChange={handleImageAttach}
-            className="hidden"
+            className="sr-only"
           />
 
           <textarea
