@@ -93,10 +93,12 @@ const INACTIVITY_REMINDER_MS = 30_000;
 function persistMessages(sessionId: string, messages: UiMessage[]) {
   if (!sessionId) return;
   try {
-    const serializable = messages.map((m) => ({
-      ...m,
-      imagePreview: undefined, // blob URLs don't survive reload
-    }));
+    const serializable = messages
+      .filter((m) => m.role !== "agent") // Don't persist pipeline steps — keep history clean
+      .map((m) => ({
+        ...m,
+        imagePreview: undefined, // blob URLs don't survive reload
+      }));
     const key = MESSAGES_STORAGE_PREFIX + sessionId;
     localStorage.setItem(key, JSON.stringify(serializable));
     console.log("[persist]", key, "→", serializable.length, "msgs");
@@ -579,7 +581,12 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
               const eventData = JSON.parse(parsed.data) as SseEvent;
 
               if (parsed.eventType === "status") setStatusLabel(eventData.message ?? null);
-              if (parsed.eventType === "agent_update") addAgentUpdate(eventData.agent, eventData.message ?? "Agent update", eventData.payload);
+              if (parsed.eventType === "agent_update") {
+                // Show as temporary status (disappears after next event) — not a permanent chat bubble
+                const name = eventData.agent;
+                const label = name ? name.charAt(0).toUpperCase() + name.slice(1) : "Agent";
+                setStatusLabel(`${label}: ${(eventData.message ?? "Processing...").slice(0, 100)}`);
+              }
               if (parsed.eventType === "final") {
                 const payload = eventData.payload as AgentApiResponse | undefined;
                 if (payload?.reply) {

@@ -190,7 +190,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
 
   try {
     // Step 2: Analyzer Agent + Nutritionix in parallel (saves 2-5s)
-    input.onEvent?.({ type: "status", message: "Analyzing your current state..." });
+    input.onEvent?.({ type: "status", message: "Reading your health data..." });
 
     const sensorSource = input.userContext?.healthData?.source ?? "mock";
     const [analyzerResult, nutritionContext] = await Promise.all([
@@ -223,12 +223,12 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     input.onEvent?.({
       type: "agent_update",
       agent: "analyzer",
-      message: `Energy: ${analyzer.energyScore}/100 — ${analyzer.summary}`,
+      message: analyzer.summary,
       payload: analyzer
     });
 
     // Step 3: Planner Agent
-    input.onEvent?.({ type: "status", message: "Building your personalized plan..." });
+    input.onEvent?.({ type: "status", message: "Creating your plan..." });
 
     const plannerResult = await runPlanner({
       message,
@@ -252,7 +252,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     });
 
     // Step 4: Monitor Agent
-    input.onEvent?.({ type: "status", message: "Composing your coaching response..." });
+    input.onEvent?.({ type: "status", message: "Putting it together..." });
 
     const monitorResult = await runMonitor({
       message,
@@ -269,7 +269,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     input.onEvent?.({
       type: "agent_update",
       agent: "monitor",
-      message: `Tone: ${monitor.tone}`,
+      message: "Response ready",
       payload: monitor
     });
   } catch (error) {
@@ -281,7 +281,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     usedFallback = true;
     logOrchestrator("Bedrock quota exceeded — switching to fallback mode", input.sessionId);
 
-    input.onEvent?.({ type: "status", message: "Analyzing your current state..." });
+    input.onEvent?.({ type: "status", message: "Reading your health data..." });
     analyzer = generateFallbackAnalyzer(message, wearable, input.sessionId);
     analyzer.energyScore = stabilizeEnergyScore(analyzer.energyScore, adaptationNotes, message);
     analyzerRaw = JSON.stringify(analyzer);
@@ -289,11 +289,11 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     input.onEvent?.({
       type: "agent_update",
       agent: "analyzer",
-      message: `Energy: ${analyzer.energyScore}/100 — ${analyzer.summary}`,
+      message: analyzer.summary,
       payload: analyzer
     });
 
-    input.onEvent?.({ type: "status", message: "Building your personalized plan..." });
+    input.onEvent?.({ type: "status", message: "Creating your plan..." });
     const nutritionContext = await getNutritionContext(message);
     plan = generateFallbackPlan(message, analyzer);
     if (nutritionContext.length > 0 && !nutritionContext[0].startsWith("Focus on balanced")) {
@@ -308,14 +308,14 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       payload: plan
     });
 
-    input.onEvent?.({ type: "status", message: "Composing your coaching response..." });
+    input.onEvent?.({ type: "status", message: "Putting it together..." });
     monitor = generateFallbackMonitor(message, analyzer, plan, input.userContext?.name);
     monitorRaw = JSON.stringify(monitor);
 
     input.onEvent?.({
       type: "agent_update",
       agent: "monitor",
-      message: `Tone: ${monitor.tone}`,
+      message: "Response ready",
       payload: monitor
     });
   }
