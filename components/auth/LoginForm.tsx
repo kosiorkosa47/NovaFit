@@ -79,9 +79,14 @@ export function LoginForm() {
             }));
           }
           // Mark onboarding as done for demo
-          localStorage.setItem("nova-onboarding-done", "1");
-          localStorage.setItem("nova-user-name", "Demo User");
-          localStorage.setItem("nova-daily-goals", JSON.stringify({ calories: 2000, steps: 8000, sleep: 8, water: 8 }));
+          localStorage.setItem("nova-health-onboarded", "1");
+          localStorage.setItem("nova-health-profile", JSON.stringify({ name: "Demo User", createdAt: new Date().toISOString() }));
+          localStorage.setItem("nova-health-goals", JSON.stringify([
+            { key: "steps", label: { en: "Steps", pl: "Kroki" }, value: "8000", unit: { en: "/ day", pl: "/ dzień" } },
+            { key: "water", label: { en: "Water", pl: "Woda" }, value: "8", unit: { en: "glasses", pl: "szklanek" } },
+            { key: "sleep", label: { en: "Sleep", pl: "Sen" }, value: "8", unit: { en: "hours", pl: "godz" } },
+            { key: "exercise", label: { en: "Exercise", pl: "Ćwiczenia" }, value: "30", unit: { en: "min", pl: "min" } },
+          ]));
         } catch { /* localStorage unavailable */ }
         router.push("/");
         router.refresh();
