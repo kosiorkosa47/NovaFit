@@ -83,6 +83,8 @@ interface UiMessage {
   scanResult?: ScanResponse;
   mealResult?: MealAnalysis;
   imagePreview?: string;
+  route?: string;
+  timing?: Record<string, number>;
 }
 
 const SESSION_STORAGE_KEY = "nova-health-session-id";
@@ -563,6 +565,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let streamingMsgId: string | null = null;
+      let streamedText = "";
 
       while (true) {
         const { value, done } = await reader.read();
@@ -578,30 +582,94 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
 
           if (parsed) {
             try {
-              const eventData = JSON.parse(parsed.data) as SseEvent;
+              const eventData = JSON.parse(parsed.data) as SseEvent & { payload?: AgentApiResponse & { route?: string; timing?: Record<string, number>; reasoning?: string; confidence?: number } };
 
               if (parsed.eventType === "status") setStatusLabel(eventData.message ?? null);
+
+              if (parsed.eventType === "dispatcher") {
+                const dp = eventData.payload;
+                const routeLabel = dp?.route ?? "full";
+                setStatusLabel(`Route: ${routeLabel}`);
+              }
+
               if (parsed.eventType === "agent_update") {
-                // Show as temporary status (disappears after next event) — not a permanent chat bubble
                 const name = eventData.agent;
                 const label = name ? name.charAt(0).toUpperCase() + name.slice(1) : "Agent";
                 setStatusLabel(`${label}: ${(eventData.message ?? "Processing...").slice(0, 100)}`);
               }
+
+              if (parsed.eventType === "text_chunk") {
+                const chunk = eventData.message ?? "";
+                if (chunk) {
+                  streamedText += chunk;
+                  if (!streamingMsgId) {
+                    // Create temporary streaming message
+                    streamingMsgId = uid();
+                    setStatusLabel(null);
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: streamingMsgId!,
+                        role: "assistant",
+                        content: streamedText,
+                        timestamp: new Date().toISOString(),
+                        agentLabel: "Nova",
+                      }
+                    ]);
+                  } else {
+                    // Update streaming message with new text
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === streamingMsgId
+                          ? { ...m, content: streamedText }
+                          : m
+                      )
+                    );
+                  }
+                }
+              }
+
               if (parsed.eventType === "final") {
                 const payload = eventData.payload as AgentApiResponse | undefined;
                 if (payload?.reply) {
-                  addAssistantMessage(payload.reply, "Nova", {
-                    plan: payload.plan,
-                    wearable: payload.wearableSnapshot,
-                    analyzerSummary: payload.analyzerSummary
-                  });
+                  if (streamingMsgId) {
+                    // Replace streaming message with final version (includes plan, etc.)
+                    // Filter timing to only include defined values
+                    const timingMap: Record<string, number> | undefined = payload.timing
+                      ? Object.fromEntries(
+                          Object.entries(payload.timing).filter((e): e is [string, number] => typeof e[1] === "number")
+                        )
+                      : undefined;
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === streamingMsgId
+                          ? {
+                              ...m,
+                              content: payload.reply,
+                              plan: payload.plan,
+                              wearable: payload.wearableSnapshot,
+                              analyzerSummary: payload.analyzerSummary,
+                              route: payload.route,
+                              timing: timingMap,
+                            }
+                          : m
+                      )
+                    );
+                    speakText(payload.reply);
+                    startInactivityTimer();
+                  } else {
+                    addAssistantMessage(payload.reply, "Nova", {
+                      plan: payload.plan,
+                      wearable: payload.wearableSnapshot,
+                      analyzerSummary: payload.analyzerSummary
+                    });
+                  }
                 }
                 // Health Twin: save profile updates from agent
                 if (payload?.profileUpdates) {
                   try {
                     const twin = loadHealthTwin();
                     const updated = applyProfileUpdates(twin, payload.profileUpdates);
-                    // Add session summary with energy score
                     const topics = payload.profileUpdates.sessionNote
                       ? [payload.profileUpdates.sessionNote]
                       : [payload.analyzerSummary?.slice(0, 80) ?? "conversation"];
@@ -623,7 +691,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
         }
       }
     },
-    [addAgentUpdate, addAssistantMessage]
+    [addAgentUpdate, addAssistantMessage, speakText, startInactivityTimer]
   );
 
   const sendMessage = useCallback(async (overrideMessage?: string) => {
@@ -1135,6 +1203,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                 wearable={message.wearable}
                 analyzerSummary={message.analyzerSummary}
                 agentPayload={message.agentPayload}
+                route={message.route}
+                timing={message.timing}
               />
               {message.scanResult && (
                 <NutritionScanCard data={message.scanResult} />

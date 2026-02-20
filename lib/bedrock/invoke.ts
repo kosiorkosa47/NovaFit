@@ -1,7 +1,9 @@
 import {
   ConverseCommand,
+  ConverseStreamCommand,
   type ConverseCommandInput,
   type ConverseCommandOutput,
+  type ConverseStreamCommandInput,
   type Message,
   type ContentBlock,
   type ImageFormat,
@@ -231,6 +233,76 @@ export async function invokeWithTools(
   }
 
   throw new Error("Max tool-calling rounds exceeded.");
+}
+
+/**
+ * Stream Nova 2 Lite response token-by-token.
+ * Calls onChunk for each text delta, returns full text at the end.
+ */
+export async function invokeNovaLiteStream(
+  options: InvokeOptions & { onChunk: (text: string) => void }
+): Promise<InvokeResult> {
+  const modelId = process.env.BEDROCK_MODEL_ID_LITE ?? DEFAULT_MODEL_ID_LITE;
+  const client = getBedrockClient();
+
+  const userContent: ContentBlock[] = [];
+  if (options.imageData) {
+    userContent.push({
+      image: {
+        format: options.imageData.format as ImageFormat,
+        source: { bytes: options.imageData.bytes },
+      },
+    });
+  }
+  userContent.push({ text: options.userPrompt });
+
+  const input: ConverseStreamCommandInput = {
+    modelId,
+    system: [{ text: options.systemPrompt }],
+    messages: [
+      ...buildHistoryMessages(options.history),
+      { role: "user", content: userContent },
+    ],
+    inferenceConfig: {
+      maxTokens: options.maxTokens ?? 500,
+      temperature: options.temperature ?? 0.4,
+      topP: 0.9,
+    },
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS + 10_000);
+
+  try {
+    const response = await client.send(new ConverseStreamCommand(input), {
+      abortSignal: controller.signal,
+    });
+
+    let fullText = "";
+    const stream = response.stream;
+    if (!stream) throw new Error("No stream returned from ConverseStreamCommand");
+
+    for await (const event of stream) {
+      if (event.contentBlockDelta?.delta && "text" in event.contentBlockDelta.delta) {
+        const chunk = event.contentBlockDelta.delta.text ?? "";
+        if (chunk) {
+          fullText += chunk;
+          options.onChunk(chunk);
+        }
+      }
+    }
+
+    if (!fullText.trim()) {
+      throw new Error("Streaming returned empty response.");
+    }
+
+    return { text: fullText, modelId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown streaming error";
+    throw new Error(`Nova streaming failed (${modelId}): ${message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function invokeNovaSonicOrFallback(options: InvokeOptions): Promise<InvokeResult> {

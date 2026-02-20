@@ -2,7 +2,10 @@ import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { requireAuth } from "@/lib/auth/helpers";
 import { invokeNovaLite } from "@/lib/bedrock/invoke";
-import { addMessageToMemory } from "@/lib/session/memory";
+import { addMessageToMemory, loadSession } from "@/lib/session/memory";
+import { dispatchMessage } from "@/lib/agents/dispatcher";
+import { orchestrateAgents } from "@/lib/orchestrator";
+import type { UserContext } from "@/lib/orchestrator/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -15,7 +18,6 @@ interface ChatMessage {
 interface VoiceChatBody {
   transcript: string;
   sessionId: string;
-  /** Recent conversation messages for context continuity */
   recentMessages?: ChatMessage[];
   userContext?: {
     name?: string;
@@ -85,7 +87,6 @@ function buildVoiceCoachPrompt(
 
   if (ctx?.healthTwin) parts.push(`\nUser health profile:\n${ctx.healthTwin}`);
 
-  // Add conversation history for context continuity
   if (recentMessages?.length) {
     parts.push("\n--- CONVERSATION SO FAR (reference this naturally!) ---");
     for (const msg of recentMessages.slice(-8)) {
@@ -101,14 +102,9 @@ function buildVoiceCoachPrompt(
 
 /**
  * POST /api/voice-chat
- * Fast voice conversation: text transcript → Nova 2 Lite → streamed text response.
- * Uses browser STT (instant) instead of Nova Sonic for speed.
- *
- * Accepts: { transcript, sessionId, userContext? }
- * Returns: SSE stream with events:
- *   - text_chunk:   { text }       — partial text as it generates
- *   - done:         { text }       — complete response text
- *   - error:        { message }
+ * Two modes:
+ * - Quick (greeting/quick routes): Single fast Nova call (~1.8s)
+ * - Full (full/followup routes): Route through orchestrator for full agent intelligence
  */
 export async function POST(request: Request): Promise<Response> {
   const authResult = await requireAuth();
@@ -147,7 +143,11 @@ export async function POST(request: Request): Promise<Response> {
     message: `Voice chat: "${transcript.slice(0, 60)}"`,
   });
 
-  const systemPrompt = buildVoiceCoachPrompt(body.userContext, body.recentMessages);
+  // Hydrate session from DynamoDB
+  await loadSession(body.sessionId);
+
+  // Dispatch — determine if quick or full pipeline
+  const dispatch = await dispatchMessage(transcript, false, []);
 
   const encoder = new TextEncoder();
 
@@ -164,22 +164,49 @@ export async function POST(request: Request): Promise<Response> {
       }
 
       try {
-        // Single fast call to Nova 2 Lite
-        const result = await invokeNovaLite({
-          systemPrompt,
-          userPrompt: transcript,
-          maxTokens: 300,
-          temperature: 0.7,
-        });
-        const responseText = result.text;
+        let responseText: string;
+
+        if (dispatch.route === "greeting" || dispatch.route === "quick") {
+          // Quick mode — single fast call
+          const systemPrompt = buildVoiceCoachPrompt(body.userContext, body.recentMessages);
+          const result = await invokeNovaLite({
+            systemPrompt,
+            userPrompt: transcript,
+            maxTokens: 300,
+            temperature: 0.7,
+          });
+          responseText = result.text;
+        } else {
+          // Full mode — route through orchestrator
+          const userContext: UserContext = {
+            name: body.userContext?.name,
+            appLanguage: body.userContext?.appLanguage,
+            timeOfDay: body.userContext?.timeOfDay,
+            dayOfWeek: body.userContext?.dayOfWeek,
+            goals: body.userContext?.goals as UserContext["goals"],
+            healthTwin: body.userContext?.healthTwin,
+            recentMeals: body.userContext?.recentMeals as UserContext["recentMeals"],
+          };
+
+          const result = await orchestrateAgents({
+            sessionId: body.sessionId,
+            message: transcript,
+            userContext,
+            mode: "voice",
+          });
+
+          responseText = result.apiResponse.reply;
+
+          // Include route info in response
+          sse("route", { route: dispatch.route, timing: result.timing });
+        }
 
         if (!responseText) {
           sse("error", { message: "No response generated." });
         } else {
-          // Send complete text
-          sse("done", { text: responseText });
+          sse("done", { text: responseText, route: dispatch.route });
 
-          // Save to session memory so text pipeline knows about voice exchanges
+          // Save to session memory
           const now = new Date().toISOString();
           addMessageToMemory(body.sessionId, {
             id: `voice-u-${Date.now()}`,
@@ -198,7 +225,7 @@ export async function POST(request: Request): Promise<Response> {
         log({
           level: "info",
           agent: "voice-chat",
-          message: `Voice chat done: "${transcript.slice(0, 40)}" → "${(responseText || "").slice(0, 60)}"`,
+          message: `Voice chat done (${dispatch.route}): "${transcript.slice(0, 40)}" → "${(responseText || "").slice(0, 60)}"`,
         });
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unknown error";

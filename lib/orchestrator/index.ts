@@ -1,6 +1,8 @@
 import { runAnalyzer } from "@/lib/agents/analyzer";
 import { runPlanner } from "@/lib/agents/planner";
-import { runMonitor } from "@/lib/agents/monitor";
+import { runMonitor, runMonitorStreaming } from "@/lib/agents/monitor";
+import { dispatchMessage } from "@/lib/agents/dispatcher";
+import type { DispatchRoute } from "@/lib/agents/dispatcher";
 import {
   generateFallbackAnalyzer,
   generateFallbackPlan,
@@ -11,6 +13,7 @@ import { getNutritionContext } from "@/lib/integrations/nutritionix";
 import { getWearableSnapshot } from "@/lib/integrations/wearables.mock";
 import type {
   AgentApiResponse,
+  AgentTiming,
   AnalyzerResult,
   MonitorResult,
   OrchestratorInput,
@@ -76,15 +79,12 @@ function formatUserContext(ctx?: UserContext): string {
   return parts.length ? parts.join("\n") : "";
 }
 
-/** Post-process energy score — prevent wild swings between conversation turns.
- *  Nova 2 Lite tends to give aggressively low scores (0-15) on follow-ups.
- *  This stabilizer enforces consistency at the code level. */
+/** Post-process energy score — prevent wild swings between conversation turns. */
 function stabilizeEnergyScore(
   rawScore: number,
   adaptationNotes: string[],
   currentMessage: string
 ): number {
-  // Find the most recent previous energy score from adaptation notes
   let prevScore: number | null = null;
   for (const note of adaptationNotes) {
     const match = note.match(/Previous energy score:\s*(\d+)\/100/);
@@ -93,14 +93,12 @@ function stabilizeEnergyScore(
     }
   }
 
-  // Floor: scores below 20 only for genuine emergencies
   const emergencyPattern = /(?:emergency|faint|unconscious|hospital|ambulance|chest\s*pain|can'?t\s*breathe|severe|collapsed|dizzy|blacking\s*out)/i;
   const isEmergency = emergencyPattern.test(currentMessage);
   const minScore = isEmergency ? 5 : 20;
 
   let score = Math.max(rawScore, minScore);
 
-  // If we have a previous score, limit the change per turn
   if (prevScore !== null) {
     const worseningPattern = /(?:worse|terrible|awful|horrible|can'?t\s*move|much\s*more\s*tired|significantly\s*worse|really\s*bad)/i;
     const improvingPattern = /(?:better|great|amazing|wonderful|much\s*better|recovered|well[\s-]*rested|energized|fantastic)/i;
@@ -122,7 +120,6 @@ function buildAgentResponseText(
   _plan: PlanRecommendation,
   monitor: MonitorResult
 ): string {
-  // Keep reply text clean — structured plan data is displayed as cards in the UI
   return [
     monitor.reply,
     "",
@@ -130,9 +127,73 @@ function buildAgentResponseText(
   ].join("\n");
 }
 
+/** Run only the Monitor agent (for greeting/quick routes) */
+async function runMonitorOnly(
+  input: OrchestratorInput,
+  message: string,
+  history: ReturnType<typeof getRecentMessages>,
+  userContextStr: string,
+  timing: AgentTiming
+): Promise<{ monitor: MonitorResult; monitorRaw: string }> {
+  const monitorStart = Date.now();
+  const isVoice = input.mode === "voice";
+
+  // For greeting/quick, use Monitor with simplified context
+  const dummyAnalyzer: AnalyzerResult = {
+    summary: "Quick response — no health analysis needed.",
+    energyScore: 70,
+    keySignals: [],
+    riskFlags: [],
+  };
+  const dummyPlan: PlanRecommendation = {
+    summary: "No plan needed for this message.",
+    diet: [],
+    exercise: [],
+    hydration: "",
+    recovery: "",
+    nutritionContext: [],
+  };
+
+  // Try streaming for text mode
+  if (!isVoice && input.onEvent) {
+    try {
+      const result = await runMonitorStreaming({
+        message,
+        analyzer: dummyAnalyzer,
+        plan: dummyPlan,
+        history,
+        userContextStr,
+        sessionId: input.sessionId,
+        voiceMode: false,
+        onChunk: (chunk) => {
+          input.onEvent?.({ type: "text_chunk", message: chunk });
+        },
+      });
+      timing.monitor = Date.now() - monitorStart;
+      return { monitor: result.parsed, monitorRaw: result.raw };
+    } catch {
+      // Fall through to sync
+    }
+  }
+
+  const result = await runMonitor({
+    message,
+    analyzer: dummyAnalyzer,
+    plan: dummyPlan,
+    history,
+    userContextStr,
+    sessionId: input.sessionId,
+    voiceMode: isVoice,
+  });
+  timing.monitor = Date.now() - monitorStart;
+  return { monitor: result.parsed, monitorRaw: result.raw };
+}
+
 export async function orchestrateAgents(input: OrchestratorInput): Promise<OrchestratorOutput> {
+  const pipelineStart = Date.now();
   const message = sanitizeMessageInput(input.message);
   const feedback = input.feedback ? sanitizeFeedbackInput(input.feedback) : undefined;
+  const timing: AgentTiming = {};
 
   logOrchestrator("Starting agent pipeline", input.sessionId);
   cleanupExpiredSessions();
@@ -141,11 +202,68 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   const adaptationNotes = getAdaptationNotes(input.sessionId);
   const userFacts = getUserFacts(input.sessionId);
 
-  // Step 1: Collect wearable context (prefer real data from client)
+  // Step 0: Dispatcher — classify intent and route to minimum agents
+  const dispatchStart = Date.now();
+  const dispatch = await dispatchMessage(message, !!input.image, history);
+  timing.dispatcher = Date.now() - dispatchStart;
+
+  const route: DispatchRoute = dispatch.route;
+  logOrchestrator(`Dispatcher: route=${route} confidence=${dispatch.confidence} (${timing.dispatcher}ms)`, input.sessionId);
+
+  input.onEvent?.({
+    type: "dispatcher",
+    message: `Route: ${route}`,
+    payload: { route, confidence: dispatch.confidence, reasoning: dispatch.reasoning },
+  });
+
+  // Build user context string for prompts
+  const userContextStr = formatUserContext(input.userContext);
+
+  // ── Greeting / Quick route: Monitor only ──
+  if (route === "greeting" || route === "quick") {
+    input.onEvent?.({ type: "status", message: "Responding..." });
+
+    const { monitor, monitorRaw } = await runMonitorOnly(input, message, history, userContextStr, timing);
+
+    const composedReply = buildAgentResponseText(
+      { summary: "", energyScore: 70, keySignals: [], riskFlags: [] },
+      { summary: "", diet: [], exercise: [], hydration: "", recovery: "", nutritionContext: [] },
+      monitor
+    );
+
+    addMessageToMemory(input.sessionId, { id: safeId(), role: "user", content: message, createdAt: nowIso() });
+    addMessageToMemory(input.sessionId, { id: safeId(), role: "assistant", content: composedReply, createdAt: nowIso() });
+
+    timing.total = Date.now() - pipelineStart;
+    logOrchestrator(`Pipeline complete (${route} route, ${timing.total}ms)`, input.sessionId);
+
+    const apiResponse: AgentApiResponse = {
+      success: true,
+      sessionId: input.sessionId,
+      reply: composedReply,
+      analyzerSummary: "",
+      plan: { summary: "", diet: [], exercise: [], hydration: "", recovery: "", nutritionContext: [] },
+      monitorTone: monitor.tone,
+      memorySize: getMemorySize(input.sessionId),
+      profileUpdates: monitor.profileUpdates,
+      route,
+      timing,
+    };
+
+    return {
+      apiResponse,
+      analyzer: { agent: "analyzer", raw: "", parsed: { summary: "", energyScore: 70, keySignals: [], riskFlags: [] } },
+      planner: { agent: "planner", raw: "", parsed: { summary: "", diet: [], exercise: [], hydration: "", recovery: "", nutritionContext: [] } },
+      monitor: { agent: "monitor", raw: monitorRaw, parsed: monitor },
+      route,
+      timing,
+    };
+  }
+
+  // ── Full / Follow-up / Photo: collect wearable data ──
   input.onEvent?.({ type: "status", message: "Checking your recent activity..." });
   let wearable = await getWearableSnapshot(input.sessionId);
 
-  // Override mock with real sensor data from client if available
   if (input.userContext?.healthData && input.userContext.healthData.source !== "mock") {
     const hd = input.userContext.healthData;
     wearable = {
@@ -157,8 +275,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       capturedAt: new Date().toISOString(),
     };
   }
-  // Override wearable data with user-stated values from conversation
-  // This prevents the model from seeing conflicting data (e.g., sensor says 0 steps but user said 4000)
+
   const allUserText = [
     ...history.filter(m => m.role === "user").map(m => m.content),
     message
@@ -176,10 +293,6 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
 
   logOrchestrator(`Wearable: steps=${wearable.steps}, sleep=${wearable.sleepHours}h, stress=${wearable.stressLevel} (source: ${input.userContext?.healthData?.source ?? "mock"})`, input.sessionId);
 
-  // Build user context string for prompts
-  const userContextStr = formatUserContext(input.userContext);
-
-  // Try the full Nova pipeline; fall back to template-based responses on quota errors
   let analyzer: AnalyzerResult;
   let plan: PlanRecommendation;
   let monitor: MonitorResult;
@@ -189,95 +302,178 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   let usedFallback = false;
 
   try {
-    // Step 2: Analyzer Agent + Nutritionix in parallel (saves 2-5s)
-    input.onEvent?.({ type: "status", message: "Reading your health data..." });
+    // ── Follow-up route: skip Analyzer, use last known state ──
+    if (route === "followup") {
+      input.onEvent?.({ type: "status", message: "Building on our conversation..." });
 
-    const sensorSource = input.userContext?.healthData?.source ?? "mock";
-    const [analyzerResult, nutritionContext] = await Promise.all([
-      runAnalyzer({
+      // Use a lightweight analyzer result from adaptation notes
+      const prevEnergyMatch = adaptationNotes.join(" ").match(/Previous energy score:\s*(\d+)\/100/);
+      const prevEnergy = prevEnergyMatch ? parseInt(prevEnergyMatch[1], 10) : 65;
+
+      analyzer = {
+        summary: "Follow-up to previous conversation — using existing context.",
+        energyScore: prevEnergy,
+        keySignals: ["Follow-up message"],
+        riskFlags: [],
+      };
+      analyzerRaw = JSON.stringify(analyzer);
+
+      // Still run Planner for follow-up (may need updated plan)
+      const plannerStart = Date.now();
+      const nutritionContext = await getNutritionContext(message);
+      const plannerResult = await runPlanner({
         message,
         feedback,
-        wearable,
-        sensorSource,
+        analyzer,
+        nutritionContext,
         history,
         adaptationNotes,
         userFacts,
         userContextStr,
         sessionId: input.sessionId,
-        imageData: input.image,
-      }),
-      getNutritionContext(message),
-    ]);
-    analyzer = analyzerResult.parsed;
-    analyzerRaw = analyzerResult.raw;
+      });
+      plan = plannerResult.parsed;
+      plannerRaw = plannerResult.raw;
+      timing.planner = Date.now() - plannerStart;
 
-    // Stabilize energy score — prevent wild swings between turns
-    const rawEnergyScore = analyzer.energyScore;
-    analyzer.energyScore = stabilizeEnergyScore(rawEnergyScore, adaptationNotes, message);
-    if (rawEnergyScore !== analyzer.energyScore) {
-      logOrchestrator(`Energy score stabilized: ${rawEnergyScore} → ${analyzer.energyScore} (prev notes: ${adaptationNotes.length})`, input.sessionId);
+      input.onEvent?.({
+        type: "agent_update",
+        agent: "planner",
+        message: plan.summary,
+        payload: plan,
+      });
+    } else {
+      // ── Full / Photo: run all 3 agents ──
+      input.onEvent?.({ type: "status", message: "Reading your health data..." });
+
+      const analyzerStart = Date.now();
+      const sensorSource = input.userContext?.healthData?.source ?? "mock";
+      const [analyzerResult, nutritionContext] = await Promise.all([
+        runAnalyzer({
+          message,
+          feedback,
+          wearable,
+          sensorSource,
+          history,
+          adaptationNotes,
+          userFacts,
+          userContextStr,
+          sessionId: input.sessionId,
+          imageData: input.image,
+        }),
+        getNutritionContext(message),
+      ]);
+      analyzer = analyzerResult.parsed;
+      analyzerRaw = analyzerResult.raw;
+      timing.analyzer = Date.now() - analyzerStart;
+
+      const rawEnergyScore = analyzer.energyScore;
+      analyzer.energyScore = stabilizeEnergyScore(rawEnergyScore, adaptationNotes, message);
+      if (rawEnergyScore !== analyzer.energyScore) {
+        logOrchestrator(`Energy score stabilized: ${rawEnergyScore} → ${analyzer.energyScore}`, input.sessionId);
+      }
+
+      logOrchestrator(`Image passed to analyzer: ${input.image ? `${input.image.format}, ${input.image.bytes.length} bytes` : "none"}`, input.sessionId);
+
+      input.onEvent?.({
+        type: "agent_update",
+        agent: "analyzer",
+        message: analyzer.summary,
+        payload: analyzer,
+      });
+
+      // Step 3: Planner Agent
+      input.onEvent?.({ type: "status", message: "Creating your plan..." });
+
+      const plannerStart = Date.now();
+      const plannerResult = await runPlanner({
+        message,
+        feedback,
+        analyzer,
+        nutritionContext,
+        history,
+        adaptationNotes,
+        userFacts,
+        userContextStr,
+        sessionId: input.sessionId,
+      });
+      plan = plannerResult.parsed;
+      plannerRaw = plannerResult.raw;
+      timing.planner = Date.now() - plannerStart;
+
+      input.onEvent?.({
+        type: "agent_update",
+        agent: "planner",
+        message: plan.summary,
+        payload: plan,
+      });
     }
 
-    logOrchestrator(`Image passed to analyzer: ${input.image ? `${input.image.format}, ${input.image.bytes.length} bytes` : "none"}`, input.sessionId);
-
-    input.onEvent?.({
-      type: "agent_update",
-      agent: "analyzer",
-      message: analyzer.summary,
-      payload: analyzer
-    });
-
-    // Step 3: Planner Agent
-    input.onEvent?.({ type: "status", message: "Creating your plan..." });
-
-    const plannerResult = await runPlanner({
-      message,
-      feedback,
-      analyzer,
-      nutritionContext,
-      history,
-      adaptationNotes,
-      userFacts,
-      userContextStr,
-      sessionId: input.sessionId
-    });
-    plan = plannerResult.parsed;
-    plannerRaw = plannerResult.raw;
-
-    input.onEvent?.({
-      type: "agent_update",
-      agent: "planner",
-      message: plan.summary,
-      payload: plan
-    });
-
-    // Step 4: Monitor Agent
+    // Step 4: Monitor Agent (with streaming for text mode)
     input.onEvent?.({ type: "status", message: "Putting it together..." });
 
-    const monitorResult = await runMonitor({
-      message,
-      feedback,
-      analyzer,
-      plan,
-      history,
-      userContextStr,
-      sessionId: input.sessionId
-    });
-    monitor = monitorResult.parsed;
-    monitorRaw = monitorResult.raw;
+    const monitorStart = Date.now();
+    const isVoice = input.mode === "voice";
+
+    if (!isVoice && input.onEvent) {
+      // Try streaming monitor
+      try {
+        const monitorResult = await runMonitorStreaming({
+          message,
+          feedback,
+          analyzer,
+          plan,
+          history,
+          userContextStr,
+          sessionId: input.sessionId,
+          voiceMode: false,
+          onChunk: (chunk) => {
+            input.onEvent?.({ type: "text_chunk", message: chunk });
+          },
+        });
+        monitor = monitorResult.parsed;
+        monitorRaw = monitorResult.raw;
+      } catch {
+        // Fallback to sync monitor
+        const monitorResult = await runMonitor({
+          message,
+          feedback,
+          analyzer,
+          plan,
+          history,
+          userContextStr,
+          sessionId: input.sessionId,
+        });
+        monitor = monitorResult.parsed;
+        monitorRaw = monitorResult.raw;
+      }
+    } else {
+      const monitorResult = await runMonitor({
+        message,
+        feedback,
+        analyzer,
+        plan,
+        history,
+        userContextStr,
+        sessionId: input.sessionId,
+        voiceMode: isVoice,
+      });
+      monitor = monitorResult.parsed;
+      monitorRaw = monitorResult.raw;
+    }
+    timing.monitor = Date.now() - monitorStart;
 
     input.onEvent?.({
       type: "agent_update",
       agent: "monitor",
       message: "Response ready",
-      payload: monitor
+      payload: monitor,
     });
   } catch (error) {
     if (!isQuotaError(error)) {
-      throw error; // Not a quota issue — rethrow
+      throw error;
     }
 
-    // Quota exceeded — use intelligent fallback
     usedFallback = true;
     logOrchestrator("Bedrock quota exceeded — switching to fallback mode", input.sessionId);
 
@@ -290,7 +486,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       type: "agent_update",
       agent: "analyzer",
       message: analyzer.summary,
-      payload: analyzer
+      payload: analyzer,
     });
 
     input.onEvent?.({ type: "status", message: "Creating your plan..." });
@@ -305,7 +501,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       type: "agent_update",
       agent: "planner",
       message: plan.summary,
-      payload: plan
+      payload: plan,
     });
 
     input.onEvent?.({ type: "status", message: "Putting it together..." });
@@ -316,7 +512,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       type: "agent_update",
       agent: "monitor",
       message: "Response ready",
-      payload: monitor
+      payload: monitor,
     });
   }
 
@@ -328,7 +524,6 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   addAdaptationNote(input.sessionId, monitor.adaptationNote);
   addAdaptationNote(input.sessionId, `Previous energy score: ${analyzer.energyScore}/100 — maintain consistency unless user reports significant change`);
 
-  // Extract user facts from adaptation notes (simple heuristic)
   if (monitor.adaptationNote.toLowerCase().includes("allerg")) {
     addUserFact(input.sessionId, monitor.adaptationNote);
   }
@@ -352,7 +547,8 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     createdAt: nowIso()
   });
 
-  logOrchestrator(`Pipeline complete${usedFallback ? " (fallback mode)" : ""}`, input.sessionId);
+  timing.total = Date.now() - pipelineStart;
+  logOrchestrator(`Pipeline complete (${route} route, ${timing.total}ms)${usedFallback ? " [fallback]" : ""}`, input.sessionId);
 
   const apiResponse: AgentApiResponse = {
     success: true,
@@ -364,12 +560,16 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     memorySize: getMemorySize(input.sessionId),
     wearableSnapshot: wearable,
     profileUpdates: monitor.profileUpdates,
+    route,
+    timing,
   };
 
   return {
     apiResponse,
     analyzer: { agent: "analyzer", raw: analyzerRaw, parsed: analyzer },
     planner: { agent: "planner", raw: plannerRaw, parsed: plan },
-    monitor: { agent: "monitor", raw: monitorRaw, parsed: monitor }
+    monitor: { agent: "monitor", raw: monitorRaw, parsed: monitor },
+    route,
+    timing,
   };
 }

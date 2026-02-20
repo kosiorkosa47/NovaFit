@@ -11,6 +11,7 @@ import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import { isValidSessionId } from "@/lib/utils/sanitize";
 import { requireAuth } from "@/lib/auth/helpers";
+import { loadSession } from "@/lib/session/memory";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -128,6 +129,9 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     assertBedrockEnv();
+
+    // Hydrate session from DynamoDB (survives cold starts)
+    await loadSession(sessionId);
 
     log({ level: "info", agent: "api", message: `POST /api/agent session=${sessionId.slice(0, 8)} mode=${parsed.data.mode ?? "stream"} image=${image ? "yes" : "no"}` });
 

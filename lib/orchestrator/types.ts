@@ -5,9 +5,19 @@ export type AgentName = "analyzer" | "planner" | "monitor";
 
 export type StreamMode = "stream" | "json";
 
+export type DispatchRoute = "greeting" | "quick" | "followup" | "photo" | "full";
+
+export interface DispatcherResult {
+  route: DispatchRoute;
+  confidence: number;
+  reasoning: string;
+}
+
 export type SseEventType =
   | "status"
   | "agent_update"
+  | "dispatcher"
+  | "text_chunk"
   | "final"
   | "error"
   | "done";
@@ -101,6 +111,8 @@ export interface AgentApiResponse {
   memorySize: number;
   wearableSnapshot?: WearableSnapshot;
   profileUpdates?: ProfileUpdates;
+  route?: DispatchRoute;
+  timing?: AgentTiming;
 }
 
 export interface OrchestratorInput {
@@ -109,7 +121,16 @@ export interface OrchestratorInput {
   feedback?: string;
   image?: ImageAttachment;
   userContext?: UserContext;
+  mode?: "voice" | "text";
   onEvent?: (event: SseEvent) => void;
+}
+
+export interface AgentTiming {
+  dispatcher?: number;
+  analyzer?: number;
+  planner?: number;
+  monitor?: number;
+  total?: number;
 }
 
 export interface OrchestratorOutput {
@@ -117,4 +138,6 @@ export interface OrchestratorOutput {
   analyzer: AgentStepResult<AnalyzerResult>;
   planner: AgentStepResult<PlanRecommendation>;
   monitor: AgentStepResult<MonitorResult>;
+  route?: DispatchRoute;
+  timing?: AgentTiming;
 }

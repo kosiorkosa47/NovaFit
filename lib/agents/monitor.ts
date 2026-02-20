@@ -1,4 +1,4 @@
-import { invokeNovaLite } from "@/lib/bedrock/invoke";
+import { invokeNovaLite, invokeNovaLiteStream } from "@/lib/bedrock/invoke";
 import type { AnalyzerResult, PlanRecommendation, MonitorResult } from "@/lib/orchestrator/types";
 import type { ProfileUpdates } from "@/lib/health-twin/types";
 import { MONITOR_SYSTEM_PROMPT } from "@/lib/orchestrator/prompts";
@@ -79,18 +79,16 @@ export interface MonitorInput {
   history: ChatMessage[];
   userContextStr?: string;
   sessionId: string;
+  voiceMode?: boolean;
 }
 
-export async function runMonitor(input: MonitorInput): Promise<{ raw: string; parsed: MonitorResult }> {
-  const startTime = logAgentStart("Monitor", input.sessionId);
-
-  // Build conversation context summary for the monitor
+function buildMonitorPrompt(input: MonitorInput): string {
   const prevUserMsgs = input.history.filter(m => m.role === "user").map(m => m.content);
   const conversationContext = prevUserMsgs.length
     ? `\nPREVIOUS MESSAGES FROM USER (reference these naturally):\n${prevUserMsgs.map(m => `- "${m.slice(0, 120)}"`).join("\n")}`
     : "";
 
-  const userPrompt = [
+  return [
     `Current user message: ${input.message}`,
     input.feedback ? `User feedback: ${input.feedback}` : "",
     conversationContext,
@@ -106,13 +104,27 @@ export async function runMonitor(input: MonitorInput): Promise<{ raw: string; pa
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function getSystemPrompt(voiceMode?: boolean): string {
+  if (voiceMode) {
+    return MONITOR_SYSTEM_PROMPT + "\n\nIMPORTANT: This response will be SPOKEN aloud. Keep it under 4 sentences. Use spoken, conversational language. No written formatting.";
+  }
+  return MONITOR_SYSTEM_PROMPT;
+}
+
+export async function runMonitor(input: MonitorInput): Promise<{ raw: string; parsed: MonitorResult }> {
+  const startTime = logAgentStart("Monitor", input.sessionId);
+
+  const userPrompt = buildMonitorPrompt(input);
+  const maxTokens = input.voiceMode ? 300 : 700;
 
   try {
     const result = await invokeNovaLite({
-      systemPrompt: MONITOR_SYSTEM_PROMPT,
+      systemPrompt: getSystemPrompt(input.voiceMode),
       userPrompt,
       history: input.history,
-      maxTokens: 700,
+      maxTokens,
       temperature: 0.5
     });
 
@@ -121,6 +133,37 @@ export async function runMonitor(input: MonitorInput): Promise<{ raw: string; pa
     return { raw: result.text, parsed };
   } catch (error) {
     logAgentError("Monitor", error, input.sessionId);
+    throw error;
+  }
+}
+
+/**
+ * Streaming variant — yields text chunks via onChunk callback.
+ * Falls back to sync on streaming failure.
+ */
+export async function runMonitorStreaming(
+  input: MonitorInput & { onChunk: (chunk: string) => void }
+): Promise<{ raw: string; parsed: MonitorResult }> {
+  const startTime = logAgentStart("Monitor (streaming)", input.sessionId);
+
+  const userPrompt = buildMonitorPrompt(input);
+  const maxTokens = input.voiceMode ? 300 : 700;
+
+  try {
+    const result = await invokeNovaLiteStream({
+      systemPrompt: getSystemPrompt(input.voiceMode),
+      userPrompt,
+      history: input.history,
+      maxTokens,
+      temperature: 0.5,
+      onChunk: input.onChunk,
+    });
+
+    const parsed = parseMonitorResult(result.text);
+    logAgentDone("Monitor (streaming)", startTime, input.sessionId);
+    return { raw: result.text, parsed };
+  } catch (error) {
+    logAgentError("Monitor (streaming)", error, input.sessionId);
     throw error;
   }
 }

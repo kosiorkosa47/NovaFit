@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Zap, AlertTriangle, Utensils, Dumbbell, Droplets, Moon, Brain } from "lucide-react";
+import { ChevronDown, ChevronUp, Zap, AlertTriangle, Utensils, Dumbbell, Droplets, Moon, Brain, Route, Clock, Cpu } from "lucide-react";
 
 interface AnalyzerPayload {
   summary: string;
@@ -50,6 +50,59 @@ function EnergyGauge({ score }: { score: number }) {
           <div className={`h-full rounded-full ${color} transition-all duration-700`} style={{ width: `${Math.min(100, score)}%` }} />
         </div>
       </div>
+    </div>
+  );
+}
+
+const ROUTE_LABELS: Record<string, { label: string; color: string }> = {
+  greeting: { label: "Direct", color: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" },
+  quick: { label: "Direct", color: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" },
+  followup: { label: "Follow-up", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
+  full: { label: "Full Pipeline", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
+  photo: { label: "Photo Analysis", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+};
+
+function RouteBadge({ route }: { route: string }) {
+  const info = ROUTE_LABELS[route] ?? { label: route, color: "bg-gray-100 text-gray-700" };
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-semibold ${info.color}`}>
+      <Route className="h-2.5 w-2.5" />
+      {info.label}
+    </span>
+  );
+}
+
+function AgentBadges({ timing }: { timing: Record<string, number> }) {
+  const agents: { key: string; label: string; color: string }[] = [
+    { key: "dispatcher", label: "Dispatcher", color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
+    { key: "analyzer", label: "Analyzer", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
+    { key: "planner", label: "Planner", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+    { key: "monitor", label: "Monitor", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
+  ];
+
+  const activeAgents = agents.filter((a) => timing[a.key] !== undefined);
+  if (!activeAgents.length) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {activeAgents.map((a) => (
+        <span key={a.key} className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-medium ${a.color}`}>
+          <Cpu className="h-2 w-2" />
+          {a.label} {(timing[a.key] / 1000).toFixed(1)}s
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function TimingBar({ timing }: { timing: Record<string, number> }) {
+  const total = timing.total;
+  if (!total) return null;
+
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] text-foreground/60">
+      <Clock className="h-2.5 w-2.5" />
+      <span>Total: {(total / 1000).toFixed(1)}s</span>
     </div>
   );
 }
@@ -144,31 +197,65 @@ function MonitorDetails({ data }: { data: MonitorPayload }) {
   );
 }
 
-export function AgentReasoningPanel({ agentLabel, payload }: { agentLabel?: string; payload?: unknown }) {
+interface AgentReasoningPanelProps {
+  agentLabel?: string;
+  payload?: unknown;
+  route?: string;
+  timing?: Record<string, number>;
+}
+
+export function AgentReasoningPanel({ agentLabel, payload, route, timing }: AgentReasoningPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
-  if (!payload) return null;
-
+  const hasRoute = !!route;
+  const hasTiming = timing && Object.keys(timing).length > 0;
   const label = agentLabel?.toLowerCase() ?? "";
   const hasDetails = isAnalyzer(payload) || isPlanner(payload) || isMonitor(payload);
 
-  if (!hasDetails) return null;
+  if (!hasDetails && !hasRoute && !hasTiming) return null;
 
   return (
     <div className="mt-1">
       <button
         type="button"
         onClick={() => setExpanded(v => !v)}
-        className="flex min-h-[36px] items-center gap-1 rounded-lg px-1.5 text-[11px] font-medium text-emerald-600/70 transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 active:bg-emerald-500/20 dark:text-emerald-400/70 dark:hover:text-emerald-400"
+        className="flex min-h-[36px] items-center gap-1.5 rounded-lg px-1.5 text-[11px] font-medium text-emerald-600/70 transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 active:bg-emerald-500/20 dark:text-emerald-400/70 dark:hover:text-emerald-400"
       >
         {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         {expanded ? "Hide reasoning" : "Show reasoning"}
+        {/* Inline badges when collapsed */}
+        {!expanded && hasRoute && (
+          <RouteBadge route={route} />
+        )}
+        {!expanded && hasTiming && timing.total && (
+          <span className="ml-1 text-[9px] font-normal text-foreground/40">
+            {(timing.total / 1000).toFixed(1)}s
+          </span>
+        )}
       </button>
       {expanded && (
-        <div className="mt-1 animate-fade-in-up rounded-lg border border-emerald-200/40 bg-emerald-50/30 px-2 py-1.5 dark:border-emerald-800/20 dark:bg-emerald-950/20">
+        <div className="mt-1 animate-fade-in-up space-y-2 rounded-lg border border-emerald-200/40 bg-emerald-50/30 px-2 py-1.5 dark:border-emerald-800/20 dark:bg-emerald-950/20">
+          {/* Route + Timing badges */}
+          {(hasRoute || hasTiming) && (
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {hasRoute && <RouteBadge route={route} />}
+                {hasTiming && <TimingBar timing={timing} />}
+              </div>
+              {hasTiming && <AgentBadges timing={timing} />}
+            </div>
+          )}
           {label.includes("analyzer") && isAnalyzer(payload) && <AnalyzerDetails data={payload} />}
           {label.includes("planner") && isPlanner(payload) && <PlannerDetails data={payload} />}
           {label.includes("monitor") && isMonitor(payload) && <MonitorDetails data={payload} />}
+          {/* Show all details for non-labeled panels (assistant messages) */}
+          {!label.includes("analyzer") && !label.includes("planner") && !label.includes("monitor") && (
+            <>
+              {isAnalyzer(payload) && <AnalyzerDetails data={payload} />}
+              {isPlanner(payload) && <PlannerDetails data={payload} />}
+              {isMonitor(payload) && <MonitorDetails data={payload} />}
+            </>
+          )}
         </div>
       )}
     </div>
