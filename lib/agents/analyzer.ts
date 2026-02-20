@@ -130,7 +130,10 @@ export async function runAnalyzer(input: AnalyzerInput): Promise<{ raw: string; 
       : "",
     input.userContextStr ? `\nUser context:\n${input.userContextStr}` : "",
     // 6. FINAL REMINDER — strongest position in prompt
-    `\nFINAL REMINDER: If the user stated specific values in this conversation (e.g., "slept 5 hours", "walked 3000 steps"), you MUST use those values in your analysis, NOT the sensor data. Keep the energy score consistent with your previous assessment unless the user reports something genuinely new and different.`
+    `\nFINAL REMINDER:
+1. If the user stated specific values in this conversation (e.g., "slept 5 hours", "walked 4000 steps"), you MUST use those values, NOT the sensor data. Sensor data may be stale or reset.
+2. ENERGY SCORE CONSISTENCY: If the previous energy score was around X, your new score should be within ±15 of X unless the user explicitly reports feeling WORSE or BETTER. A follow-up message about food/allergies/preferences is NOT a reason to change the score dramatically.
+3. A score of 0-19 means MULTIPLE SERIOUS red flags (extreme symptoms, danger signs). Normal tiredness + back pain = 30-50, NOT 0.`
   ]
     .filter(Boolean)
     .join("\n");
