@@ -2,7 +2,7 @@ import { invokeNovaLite } from "@/lib/bedrock/invoke";
 import { log } from "@/lib/utils/logging";
 import type { ChatMessage } from "@/lib/session/session.types";
 
-export type DispatchRoute = "greeting" | "quick" | "followup" | "photo" | "full";
+export type DispatchRoute = "greeting" | "quick" | "followup" | "photo" | "full" | "offtopic";
 
 export interface DispatcherResult {
   route: DispatchRoute;
@@ -20,6 +20,18 @@ function preFilterRoute(message: string, hasImage: boolean, history: ChatMessage
   }
 
   const lower = message.toLowerCase().trim();
+
+  // Dangerous / self-harm / off-topic — catch before anything else
+  const dangerousPatterns = /(?:gas(?:u|em)?.*(?:buzi|ust|do ust|wdycha|pić|pic)|psikn[ąa][ćc].*(?:gaz|spray|aerozol|buzi)|(?:huff|sniff|inhale).*(?:gas|spray|aerosol|glue|paint|fume)|drink.*(?:bleach|cleaner|detergent|poison)|eat.*(?:tide pod|glue|battery|magnet)|inject.*(?:air|bleach)|wdycha[ćc].*(?:klej|gaz|spray|aerozol)|wypi[ćc].*(?:wybielacz|płyn|detergent|aceton|benzyn)|połkn[ąa][ćc].*(?:batteri|magnes)|(?:kill|hurt|harm)\s*(?:my ?self|yourself)|(?:zabić|zabi[ćc])\s*(?:się|sie)|samobójstw|samobojstw)/i;
+  if (dangerousPatterns.test(lower)) {
+    return { route: "offtopic", confidence: 0.99, reasoning: "Dangerous/harmful activity detected" };
+  }
+
+  // Clearly non-health off-topic (programming, math, politics, recipes for non-food, etc.)
+  const offTopicPatterns = /(?:(?:write|napisz).*(?:code|program|kod|esej|essay)|(?:solve|rozwiąż|rozwiaz).*(?:equation|math|równanie)|(?:tell|opowiedz).*(?:joke|żart|dowcip)|(?:who|kto)\s+(?:is|to|jest)\s+(?:president|premier|king)|(?:capital|stolica)\s+(?:of|kraju)|(?:translate|przetłumacz|przetlumacz)|(?:pokemon|fortnite|minecraft|bitcoin|crypto|krypto)|(?:how to hack|jak zhakować|jak zhakowac))/i;
+  if (offTopicPatterns.test(lower)) {
+    return { route: "offtopic", confidence: 0.9, reasoning: "Non-health topic detected" };
+  }
 
   // Greetings
   if (/^(h(i|ello|ey|owdy)|dzien dobry|czesc|cześć|siema|yo|hola|what'?s up|good (morning|afternoon|evening))[\s!?.]*$/i.test(lower)) {
@@ -70,6 +82,9 @@ async function classifyWithNova(
 - "quick": thanks, ok, short acknowledgement, simple question not about health
 - "followup": references a previous answer, asks about something discussed before, short clarification
 - "full": health complaint, asks for a plan, reports symptoms, asks about nutrition/exercise/sleep
+- "offtopic": NOT related to health/wellness/nutrition/exercise/sleep/stress. Includes: dangerous activities (inhaling gas, drinking chemicals, self-harm), programming questions, math, politics, jokes, gaming, crypto, or anything a wellness coach shouldn't generate a health plan for.
+
+IMPORTANT: If someone asks about doing something DANGEROUS to their body (spraying gas, drinking bleach, huffing chemicals), classify as "offtopic" — do NOT classify as "full" just because it involves the body.
 
 Output JSON only: {"route":"...","confidence":0.0-1.0,"reasoning":"brief reason"}`;
 
@@ -85,7 +100,7 @@ Output JSON only: {"route":"...","confidence":0.0-1.0,"reasoning":"brief reason"
       result.text.match(/\{[\s\S]*\}/)?.[0] ?? "{}"
     ) as Partial<DispatcherResult>;
 
-    const validRoutes: DispatchRoute[] = ["greeting", "quick", "followup", "photo", "full"];
+    const validRoutes: DispatchRoute[] = ["greeting", "quick", "followup", "photo", "full", "offtopic"];
     const route: DispatchRoute = validRoutes.includes(parsed.route as DispatchRoute)
       ? (parsed.route as DispatchRoute)
       : "full";

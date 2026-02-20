@@ -244,6 +244,55 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   // Build user context string for prompts
   const userContextStr = formatUserContext(input.userContext);
 
+  // ── Off-topic / Dangerous: Monitor only with guardrail context ──
+  if (route === "offtopic") {
+    input.onEvent?.({ type: "status", message: "Responding..." });
+
+    const { monitor, monitorRaw } = await runMonitorOnly(input, message, history, userContextStr, timing);
+
+    const composedReply = monitor.reply;
+
+    addMessageToMemory(input.sessionId, { id: safeId(), role: "user", content: message, createdAt: nowIso() });
+    addMessageToMemory(input.sessionId, { id: safeId(), role: "assistant", content: composedReply, createdAt: nowIso() });
+
+    traceSteps.push({ agent: "monitor", startMs: Date.now() - pipelineStart - (timing.monitor ?? 0), durationMs: timing.monitor ?? 0, status: "success" });
+    timing.total = Date.now() - pipelineStart;
+    logOrchestrator(`Pipeline complete (offtopic route, ${timing.total}ms)`, input.sessionId);
+
+    const trace: PipelineTrace = {
+      traceId: safeId(),
+      sessionId: input.sessionId,
+      route,
+      steps: traceSteps,
+      totalMs: timing.total,
+      agentCount: traceSteps.length,
+      usedFallback: false,
+    };
+
+    const apiResponse: AgentApiResponse = {
+      success: true,
+      sessionId: input.sessionId,
+      reply: composedReply,
+      analyzerSummary: "",
+      plan: { summary: "", diet: [], exercise: [], hydration: "", recovery: "", nutritionContext: [] },
+      monitorTone: monitor.tone,
+      memorySize: getMemorySize(input.sessionId),
+      route,
+      timing,
+      trace,
+    };
+
+    return {
+      apiResponse,
+      analyzer: { agent: "analyzer", raw: "", parsed: { summary: "", energyScore: 70, keySignals: [], riskFlags: [] } },
+      planner: { agent: "planner", raw: "", parsed: { summary: "", diet: [], exercise: [], hydration: "", recovery: "", nutritionContext: [] } },
+      monitor: { agent: "monitor", raw: monitorRaw, parsed: monitor },
+      route,
+      timing,
+      trace,
+    };
+  }
+
   // ── Greeting / Quick route: Monitor only ──
   if (route === "greeting" || route === "quick") {
     input.onEvent?.({ type: "status", message: "Responding..." });

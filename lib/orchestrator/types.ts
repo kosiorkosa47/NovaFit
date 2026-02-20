@@ -5,7 +5,7 @@ export type AgentName = "analyzer" | "planner" | "monitor";
 
 export type StreamMode = "stream" | "json";
 
-export type DispatchRoute = "greeting" | "quick" | "followup" | "photo" | "full";
+export type DispatchRoute = "greeting" | "quick" | "followup" | "photo" | "full" | "offtopic";
 
 export interface DispatcherResult {
   route: DispatchRoute;

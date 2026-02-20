@@ -81,4 +81,29 @@ describe("dispatchMessage — regex pre-filter", () => {
     const result = await dispatchMessage("what should I eat for dinner?", false, []);
     expect(result.route).toBe("full");
   });
+
+  it("routes dangerous question to offtopic", async () => {
+    const result = await dispatchMessage("mogę psiknąć sobie gazu do buzi?", false, []);
+    expect(result.route).toBe("offtopic");
+  });
+
+  it("routes 'drink bleach' to offtopic", async () => {
+    const result = await dispatchMessage("can I drink bleach to clean my body?", false, []);
+    expect(result.route).toBe("offtopic");
+  });
+
+  it("routes 'inhale spray' to offtopic", async () => {
+    const result = await dispatchMessage("what happens if I huff aerosol spray", false, []);
+    expect(result.route).toBe("offtopic");
+  });
+
+  it("routes programming question to offtopic", async () => {
+    const result = await dispatchMessage("write me a python program", false, []);
+    expect(result.route).toBe("offtopic");
+  });
+
+  it("routes joke request to offtopic", async () => {
+    const result = await dispatchMessage("tell me a joke", false, []);
+    expect(result.route).toBe("offtopic");
+  });
 });
