@@ -77,6 +77,37 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
+function NutritionRow({
+  label,
+  value,
+  bold,
+  indent,
+  warn,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  indent?: boolean;
+  warn?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between border-b border-border/20 py-1 ${indent ? "pl-3" : ""}`}
+    >
+      <span
+        className={`text-[10px] ${bold ? "font-semibold text-foreground/90" : "text-foreground/70"}`}
+      >
+        {label}
+      </span>
+      <span
+        className={`text-[10px] font-medium ${warn ? "text-red-500 dark:text-red-400" : "text-foreground/80"}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export function NutritionScanCard({ data }: { data: ScanResponse }) {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -215,10 +246,78 @@ export function NutritionScanCard({ data }: { data: ScanResponse }) {
       </button>
 
       {showDetails && (
-        <div className="animate-fade-in-up rounded-xl border border-border/50 bg-white/30 p-3 text-[10px] dark:bg-white/5">
-          <pre className="whitespace-pre-wrap font-sans leading-relaxed text-foreground/70">
-            {data.ingredientsRaw}
-          </pre>
+        <div className="animate-fade-in-up space-y-3">
+          {/* Nutrition Facts Table */}
+          {Object.values(facts).some(Boolean) && (
+            <div className="rounded-xl border border-border/50 bg-white/30 p-3 dark:bg-white/5">
+              <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-foreground/80">
+                Nutrition Facts
+              </h4>
+              {facts.servingSize && (
+                <p className="mb-2 border-b border-border/30 pb-1.5 text-[10px] text-muted-foreground">
+                  Serving size: {facts.servingSize}
+                </p>
+              )}
+              <div className="space-y-0">
+                {facts.calories != null && (
+                  <NutritionRow label="Calories" value={String(facts.calories)} bold />
+                )}
+                {facts.totalFat && <NutritionRow label="Total Fat" value={facts.totalFat} bold />}
+                {facts.saturatedFat && (
+                  <NutritionRow label="Saturated Fat" value={facts.saturatedFat} indent />
+                )}
+                {facts.transFat && (
+                  <NutritionRow
+                    label="Trans Fat"
+                    value={facts.transFat}
+                    indent
+                    warn={parseFloat(facts.transFat) > 0}
+                  />
+                )}
+                {facts.cholesterol && (
+                  <NutritionRow label="Cholesterol" value={facts.cholesterol} bold />
+                )}
+                {facts.sodium && (
+                  <NutritionRow
+                    label="Sodium"
+                    value={facts.sodium}
+                    bold
+                    warn={parseFloat(facts.sodium) > 600}
+                  />
+                )}
+                {facts.totalCarbs && (
+                  <NutritionRow label="Total Carbs" value={facts.totalCarbs} bold />
+                )}
+                {facts.dietaryFiber && (
+                  <NutritionRow label="Dietary Fiber" value={facts.dietaryFiber} indent />
+                )}
+                {facts.totalSugars && (
+                  <NutritionRow
+                    label="Total Sugars"
+                    value={facts.totalSugars}
+                    indent
+                    warn={parseFloat(facts.totalSugars) > 20}
+                  />
+                )}
+                {facts.addedSugars && (
+                  <NutritionRow label="Added Sugars" value={facts.addedSugars} indent />
+                )}
+                {facts.protein && <NutritionRow label="Protein" value={facts.protein} bold />}
+              </div>
+            </div>
+          )}
+
+          {/* Raw ingredients */}
+          {data.ingredientsRaw && (
+            <div className="rounded-xl border border-border/50 bg-white/30 p-3 dark:bg-white/5">
+              <h4 className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-foreground/80">
+                Ingredients
+              </h4>
+              <p className="text-[10px] leading-relaxed text-foreground/70">
+                {data.ingredientsRaw}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
