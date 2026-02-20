@@ -1,21 +1,13 @@
-import {
-  BedrockRuntimeClient,
-  InvokeModelWithBidirectionalStreamCommand,
-} from "@aws-sdk/client-bedrock-runtime";
-import { NodeHttp2Handler } from "@smithy/node-http-handler";
 import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { requireAuth } from "@/lib/auth/helpers";
-import { getWearableSnapshot, formatWearableForPrompt } from "@/lib/integrations/wearables.mock";
+import { invokeNovaLite } from "@/lib/bedrock/invoke";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
-
-const MAX_AUDIO_SIZE = 2 * 1024 * 1024; // 2 MB
+export const maxDuration = 30;
 
 interface VoiceChatBody {
-  audioBase64: string;
-  sampleRate?: number;
+  transcript: string;
   sessionId: string;
   userContext?: {
     name?: string;
@@ -28,23 +20,24 @@ interface VoiceChatBody {
   };
 }
 
-/** Build a voice-optimized health coaching system prompt */
-function buildVoiceCoachPrompt(
-  ctx?: VoiceChatBody["userContext"],
-  wearableStr?: string
-): string {
+/** Build a voice-optimized health coaching prompt */
+function buildVoiceCoachPrompt(ctx?: VoiceChatBody["userContext"]): string {
   const parts: string[] = [
-    "You are Nova, a friendly AI health and wellness coach. You are having a real-time voice conversation.",
+    "You are Nova, a knowledgeable AI health and wellness coach having a voice conversation.",
     "",
-    "VOICE CONVERSATION RULES:",
-    "- Keep responses SHORT: 2-3 sentences max. This is spoken, not written.",
-    "- Be warm, natural, conversational — like a knowledgeable friend.",
-    "- NO lists, bullet points, or structured formats. Speak naturally.",
-    "- Give specific advice: name exact foods, exercises, and amounts.",
-    "- If they are tired or stressed, acknowledge feelings first.",
-    "- Use their name once per response, naturally.",
+    "RULES:",
+    "- Give 3-5 sentences of SPECIFIC, ACTIONABLE health advice.",
+    "- Name exact foods, exercises, amounts, and timing.",
+    "- Be warm and conversational — like a smart friend who knows health science.",
+    "- If they're tired/stressed, acknowledge first, then give concrete tips.",
+    "- End with one brief follow-up question.",
     "- Match their language (Polish → Polish, English → English).",
-    "- End with a brief follow-up question to keep the conversation going.",
+    "- NO bullet points or lists — speak naturally.",
+    "",
+    "EXAMPLES of good responses:",
+    "\"That's great you went for a run this morning! To recover well, grab some Greek yogurt with banana within 30 minutes — the protein and carbs help muscle repair. For lunch, try salmon with quinoa, about 450 calories, which gives you omega-3s for inflammation. How's your water intake been today?\"",
+    "",
+    "\"I hear you're feeling tired. Since you only got 5 hours of sleep, your body needs quick energy — try a handful of almonds with an apple right now, about 200 calories. Skip the coffee after 2pm though, it'll hurt tonight's sleep. A 15-minute walk outside would actually boost your energy more than caffeine. What time are you planning to sleep tonight?\"",
   ];
 
   if (ctx?.name) parts.push(`\nUser's name: ${ctx.name}`);
@@ -67,8 +60,6 @@ function buildVoiceCoachPrompt(
     if (gp.length) parts.push(`Daily goals: ${gp.join(", ")}`);
   }
 
-  if (wearableStr) parts.push(`\nCurrent sensor data:\n${wearableStr}`);
-
   if (ctx?.recentMeals?.length) {
     const meals = ctx.recentMeals
       .slice(0, 3)
@@ -83,16 +74,14 @@ function buildVoiceCoachPrompt(
 
 /**
  * POST /api/voice-chat
- * Real-time voice conversation via Nova Sonic with streaming audio response.
+ * Fast voice conversation: text transcript → Nova 2 Lite → streamed text response.
+ * Uses browser STT (instant) instead of Nova Sonic for speed.
  *
- * Accepts: { audioBase64, sampleRate?, sessionId, userContext? }
+ * Accepts: { transcript, sessionId, userContext? }
  * Returns: SSE stream with events:
- *   - status:        { message }
- *   - transcript:    { text }       — user's speech transcribed
- *   - audio:         { chunk, sampleRate } — base64 PCM audio to play immediately
- *   - response_text: { text }       — assistant's text response
- *   - done:          { success }
- *   - error:         { message }
+ *   - text_chunk:   { text }       — partial text as it generates
+ *   - done:         { text }       — complete response text
+ *   - error:        { message }
  */
 export async function POST(request: Request): Promise<Response> {
   const authResult = await requireAuth();
@@ -102,7 +91,7 @@ export async function POST(request: Request): Promise<Response> {
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   const rl = checkRateLimit(
     `voice-chat:${authResult.userId}:${ip}`,
-    10,
+    15,
     60_000
   );
   if (!rl.allowed) {
@@ -116,39 +105,22 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const body = (await request.json().catch(() => null)) as VoiceChatBody | null;
-  if (!body?.audioBase64 || !body.sessionId) {
+  if (!body?.transcript?.trim() || !body.sessionId) {
     return new Response(
-      JSON.stringify({ error: "Missing audio or sessionId." }),
+      JSON.stringify({ error: "Missing transcript or sessionId." }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  const audioBytes = Buffer.from(body.audioBase64, "base64");
-  if (audioBytes.length > MAX_AUDIO_SIZE) {
-    return new Response(JSON.stringify({ error: "Audio too large." }), {
-      status: 413,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const sampleRate = body.sampleRate ?? 16000;
+  const transcript = body.transcript.trim().slice(0, 500);
 
   log({
     level: "info",
     agent: "voice-chat",
-    message: `Voice chat: ${(audioBytes.length / 1024).toFixed(0)} KB, ${sampleRate}Hz`,
+    message: `Voice chat: "${transcript.slice(0, 60)}"`,
   });
 
-  // Get wearable data for health context
-  let wearableStr = "";
-  try {
-    const wearable = await getWearableSnapshot(body.sessionId);
-    wearableStr = formatWearableForPrompt(wearable);
-  } catch {
-    /* ignore */
-  }
-
-  const systemPrompt = buildVoiceCoachPrompt(body.userContext, wearableStr);
+  const systemPrompt = buildVoiceCoachPrompt(body.userContext);
 
   const encoder = new TextEncoder();
 
@@ -165,203 +137,26 @@ export async function POST(request: Request): Promise<Response> {
       }
 
       try {
-        sse("status", { message: "Listening..." });
-
-        const client = new BedrockRuntimeClient({
-          region: process.env.AWS_REGION ?? "us-east-1",
-          requestHandler: new NodeHttp2Handler({
-            requestTimeout: 180_000,
-            sessionTimeout: 180_000,
-            disableConcurrentStreams: false,
-            maxConcurrentStreams: 20,
-          }),
+        // Single fast call to Nova 2 Lite
+        const result = await invokeNovaLite({
+          systemPrompt,
+          userPrompt: transcript,
+          maxTokens: 300,
+          temperature: 0.7,
         });
+        const responseText = result.text;
 
-        const promptName = `vc-${Date.now()}`;
-        const te = new TextEncoder();
-
-        // --- Build Nova Sonic event sequence ---
-        const inputEvents = [
-          // Session start
-          {
-            event: {
-              sessionStart: {
-                inferenceConfiguration: {
-                  maxTokens: 512,
-                  topP: 0.9,
-                  temperature: 0.7,
-                },
-              },
-            },
-          },
-          // Prompt start + audio output config
-          {
-            event: {
-              promptStart: {
-                promptName,
-                textOutputConfiguration: { mediaType: "text/plain" },
-                audioOutputConfiguration: {
-                  mediaType: "audio/lpcm",
-                  sampleRateHertz: 24000,
-                  sampleSizeBits: 16,
-                  channelCount: 1,
-                  voiceId: "tiffany",
-                  encoding: "base64",
-                  audioType: "SPEECH",
-                },
-              },
-            },
-          },
-          // System prompt
-          {
-            event: {
-              contentStart: {
-                promptName,
-                contentName: "system",
-                type: "TEXT",
-                interactive: false,
-                role: "SYSTEM",
-                textInputConfiguration: { mediaType: "text/plain" },
-              },
-            },
-          },
-          {
-            event: {
-              textInput: {
-                promptName,
-                contentName: "system",
-                content: systemPrompt,
-              },
-            },
-          },
-          { event: { contentEnd: { promptName, contentName: "system" } } },
-          // Audio input start
-          {
-            event: {
-              contentStart: {
-                promptName,
-                contentName: "user-audio",
-                type: "AUDIO",
-                interactive: true,
-                role: "USER",
-                audioInputConfiguration: {
-                  mediaType: "audio/lpcm",
-                  sampleRateHertz: sampleRate,
-                  sampleSizeBits: 16,
-                  channelCount: 1,
-                  audioType: "SPEECH",
-                  encoding: "base64",
-                },
-              },
-            },
-          },
-        ];
-
-        // Split audio into ~32ms chunks
-        const chunkSize = Math.floor(sampleRate * 2 * 0.032);
-        const audioInputChunks: object[] = [];
-        for (let i = 0; i < audioBytes.length; i += chunkSize) {
-          const chunk = audioBytes.subarray(
-            i,
-            Math.min(i + chunkSize, audioBytes.length)
-          );
-          audioInputChunks.push({
-            event: {
-              audioInput: {
-                promptName,
-                contentName: "user-audio",
-                content: chunk.toString("base64"),
-              },
-            },
-          });
-        }
-
-        // Closing events
-        const closingEvents = [
-          {
-            event: { contentEnd: { promptName, contentName: "user-audio" } },
-          },
-          { event: { promptEnd: { promptName } } },
-          { event: { sessionEnd: {} } },
-        ];
-
-        const allInputEvents = [
-          ...inputEvents,
-          ...audioInputChunks,
-          ...closingEvents,
-        ];
-
-        async function* generateInput() {
-          for (const evt of allInputEvents) {
-            yield { chunk: { bytes: te.encode(JSON.stringify(evt)) } };
-            await new Promise((r) => setTimeout(r, 15));
-          }
-        }
-
-        sse("status", { message: "Nova is thinking..." });
-
-        const command = new InvokeModelWithBidirectionalStreamCommand({
-          modelId: "amazon.nova-sonic-v1:0",
-          body: generateInput(),
-        });
-
-        const response = await client.send(command);
-
-        let userTranscript = "";
-        let assistantText = "";
-        let audioChunkCount = 0;
-        const td = new TextDecoder();
-
-        if (response.body) {
-          for await (const event of response.body) {
-            if (event.chunk?.bytes) {
-              try {
-                const jsonStr = td.decode(event.chunk.bytes);
-                const parsed = JSON.parse(jsonStr);
-
-                // Stream audio chunks to client IMMEDIATELY
-                if (parsed.event?.audioOutput?.content) {
-                  sse("audio", {
-                    chunk: parsed.event.audioOutput.content,
-                    sampleRate: 24000,
-                  });
-                  audioChunkCount++;
-                }
-
-                // Collect text outputs
-                if (parsed.event?.textOutput) {
-                  const content = parsed.event.textOutput.content ?? "";
-                  const role = parsed.event.textOutput.role;
-                  if (role === "USER") {
-                    userTranscript += content;
-                    sse("transcript", { text: userTranscript });
-                  } else if (role === "ASSISTANT") {
-                    assistantText += content;
-                  }
-                }
-              } catch {
-                // Skip unparseable chunks
-              }
-            }
-          }
-        }
-
-        // Send complete response text
-        if (assistantText) {
-          sse("response_text", { text: assistantText });
+        if (!responseText) {
+          sse("error", { message: "No response generated." });
+        } else {
+          // Send complete text
+          sse("done", { text: responseText });
         }
 
         log({
           level: "info",
           agent: "voice-chat",
-          message: `Voice chat done: "${userTranscript.slice(0, 50)}" → "${assistantText.slice(0, 50)}" (${audioChunkCount} audio chunks)`,
-        });
-
-        sse("done", {
-          success: true,
-          transcript: userTranscript,
-          responseText: assistantText,
-          audioChunks: audioChunkCount,
+          message: `Voice chat done: "${transcript.slice(0, 40)}" → "${(responseText || "").slice(0, 60)}"`,
         });
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unknown error";
