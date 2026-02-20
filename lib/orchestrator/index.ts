@@ -116,6 +116,23 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       capturedAt: new Date().toISOString(),
     };
   }
+  // Override wearable data with user-stated values from conversation
+  // This prevents the model from seeing conflicting data (e.g., sensor says 0 steps but user said 4000)
+  const allUserText = [
+    ...history.filter(m => m.role === "user").map(m => m.content),
+    message
+  ].join(" ").toLowerCase();
+
+  const sleepMatch = allUserText.match(/(?:slept|sleep|sleeping)\s+(?:only\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|h\b)/);
+  if (sleepMatch) {
+    wearable = { ...wearable, sleepHours: parseFloat(sleepMatch[1]) };
+  }
+
+  const stepsMatch = allUserText.match(/(\d{1,2}[,.]?\d{3})\s*steps/);
+  if (stepsMatch) {
+    wearable = { ...wearable, steps: parseInt(stepsMatch[1].replace(/[,.]/, ""), 10) };
+  }
+
   logOrchestrator(`Wearable: steps=${wearable.steps}, sleep=${wearable.sleepHours}h, stress=${wearable.stressLevel} (source: ${input.userContext?.healthData?.source ?? "mock"})`, input.sessionId);
 
   // Build user context string for prompts
