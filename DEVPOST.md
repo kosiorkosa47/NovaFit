@@ -20,7 +20,7 @@ Health apps today are either too generic ("drink 8 glasses of water") or too com
 
 NovaFit is a **5-agent dynamic wellness coaching pipeline** where each agent has a specialized role:
 
-1. **Dispatcher** — Classifies user intent (greeting, quick question, follow-up, photo, full health request) and routes to the minimum required agents. A simple "hello" skips the full pipeline (~1s vs ~5s). Uses regex pre-filtering + Nova 2 Lite for ambiguous cases.
+1. **Dispatcher** — Classifies user intent (greeting, quick question, follow-up, photo, off-topic/dangerous, full health request) and routes to the minimum required agents. A simple "hello" skips the full pipeline (~1s vs ~7s). Dangerous queries (inhaling chemicals, self-harm) are safely redirected without generating health plans. Uses regex pre-filtering + Nova 2 Lite for ambiguous cases.
 
 2. **Analyzer Agent** — Cross-references phone sensor data (steps, heart rate, sleep, stress) with what you tell it. Produces an energy score (0-100) and identifies key health signals and risk flags. Handles multimodal input — send a meal photo and it estimates calories/macros using Nova's vision.
 
@@ -38,7 +38,8 @@ NovaFit is a **5-agent dynamic wellness coaching pipeline** where each agent has
 - **Onboarding Wizard** — 3-screen health intake that immediately populates your Health Twin for first-message personalization
 - **DynamoDB persistence** — Sessions and Health Twin survive Vercel cold starts, sync across devices
 - **Observable reasoning** — Expandable panel shows dispatcher route, per-agent timing, validator status, pipeline trace timeline, and token estimates
-- **42 unit tests** — Vitest coverage for dispatcher, validator, prompt guard, Health Twin, and JSON utilities
+- **Safety guardrails** — Dispatcher detects dangerous/off-topic queries and redirects safely without generating health plans
+- **47 unit tests** — Vitest coverage for dispatcher (incl. off-topic/dangerous), validator, prompt guard, Health Twin, and JSON utilities
 
 ## How we built it
 
@@ -49,11 +50,11 @@ NovaFit is a **5-agent dynamic wellness coaching pipeline** where each agent has
 - **Mobile**: Android APK via Capacitor 8.x, with native phone sensors (pedometer, heart rate, accelerometer) and custom TTS plugin
 - **Streaming**: ConverseStreamCommand for real-time token streaming + Server-Sent Events for pipeline visibility
 - **Auth**: NextAuth v5 with Google OAuth + email/password + demo account for judges
-- **Testing**: Vitest with 42 unit tests covering core agent logic
+- **Testing**: Vitest with 47 unit tests covering core agent logic
 - **Deploy**: Vercel (serverless) with DynamoDB on-demand billing
 
 The pipeline is a **true multi-agent system** — not prompt chaining:
-- **Dynamic routing** — Dispatcher classifies intent and skips unnecessary agents (5x faster for greetings)
+- **Dynamic routing** — Dispatcher classifies intent (6 routes incl. off-topic/safety) and skips unnecessary agents (5x faster for greetings)
 - **Inter-agent verification** — Validator checks Planner output against Health Twin, triggers re-planning on conflicts
 - **Native tool calling** — Planner uses Bedrock's `toolConfig` to decide when and which tools to invoke
 - **Predictive coaching** — Monitor proactively references detected patterns from Health Twin
@@ -88,7 +89,7 @@ The pipeline is a **true multi-agent system** — not prompt chaining:
 - **Full Nova feature coverage** — 7 integration points: text, vision, tool calling, streaming, voice — all in one coherent product.
 - **Observable AI** — Pipeline trace timeline shows exactly which agents ran, how long each took, whether the Validator approved or rejected, and total token estimates.
 - **Predictive coaching** — Monitor proactively references Health Twin patterns: "I notice you tend to sleep poorly on work nights — let's prepare for that."
-- **Dynamic routing** — Dispatcher makes greetings 5x faster by skipping unnecessary agents. True agentic behavior, not rigid pipeline.
+- **Dynamic routing with safety** — Dispatcher makes greetings 5x faster by skipping unnecessary agents, and safely redirects dangerous/off-topic queries. True agentic behavior, not rigid pipeline.
 
 ## What we learned
 

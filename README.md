@@ -2,7 +2,7 @@
 
 **Amazon Nova AI Hackathon 2026 Submission**
 
-NovaFit is a 3-agent AI wellness coach that **sees your meals**, **hears your voice**, **reads your phone sensors**, and creates **personalized health plans** — powered entirely by Amazon Nova.
+NovaFit is a 5-agent AI wellness coach that **sees your meals**, **hears your voice**, **reads your phone sensors**, and creates **personalized health plans** — powered entirely by Amazon Nova.
 
 **Live demo**: [novafit-rho.vercel.app](https://novafit-rho.vercel.app)
 
@@ -106,7 +106,7 @@ sequenceDiagram
         alt Ambiguous
             D->>B: Classify intent (~50 tokens)
         end
-        D-->>O: Route: greeting|quick|followup|full|photo
+        D-->>O: Route: greeting|quick|followup|full|photo|offtopic
     end
 
     alt greeting/quick route
@@ -167,8 +167,9 @@ sequenceDiagram
 - **Observable reasoning** — Expandable panel shows dispatcher route, per-agent timing, validator status, and token estimates
 - **Onboarding intake** — 3-screen wizard that immediately populates Health Twin for first-message personalization
 - **Prompt injection defense** — Regex-based detection of injection patterns before pipeline execution
+- **Off-topic / safety guardrails** — Dispatcher detects dangerous queries (chemical ingestion, self-harm) and non-health topics, routes to safe redirect without generating health plans
 - **Graceful degradation** — Intelligent fallback with topic detection when Bedrock quota is exceeded
-- **42 unit tests** — Vitest coverage for dispatcher, validator, prompt guard, Health Twin, and JSON utilities
+- **47 unit tests** — Vitest coverage for dispatcher (incl. off-topic), validator, prompt guard, Health Twin, and JSON utilities
 
 ## Voice Architecture
 
@@ -252,7 +253,7 @@ flowchart TB
 
 ### Core
 - 5-agent pipeline: Dispatcher → Analyzer → Planner → Validator → Monitor
-- Dynamic intent routing — greeting (1 agent, ~1s) vs full pipeline (5 agents, ~5s)
+- Dynamic intent routing — greeting (1 agent, ~1s) vs full pipeline (5 agents, ~7s) vs off-topic (safe redirect)
 - Inter-agent verification loop — Validator catches allergy/safety conflicts, triggers re-planning
 - Real-time token streaming via `ConverseStreamCommand`
 - DynamoDB session persistence — survives Vercel cold starts
@@ -260,7 +261,7 @@ flowchart TB
 - Predictive coaching — proactive suggestions from Health Twin patterns
 - Onboarding wizard — 3-screen health intake for immediate personalization
 - Prompt injection defense — regex pattern detection
-- 42 unit tests (Vitest)
+- 47 unit tests (Vitest)
 - Bilingual support (English + Polish) — auto-detected from message language
 
 ### Voice AI
@@ -304,7 +305,7 @@ flowchart TB
 | Auth | NextAuth v5 (Google OAuth + Credentials) |
 | Mobile | Capacitor 8.x (Android WebView + native plugins) |
 | Deploy | Vercel (serverless, Edge Network) |
-| Testing | Vitest (42 unit tests) |
+| Testing | Vitest (47 unit tests) |
 | Nutrition | USDA FoodData Central API |
 | Design | Custom liquid glass system (Apple-style) |
 
