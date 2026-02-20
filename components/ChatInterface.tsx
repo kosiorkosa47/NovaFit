@@ -416,8 +416,18 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
       const timeOfDay = hour < 6 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
       const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+      // Include recent conversation messages for voice context continuity
+      const recentMessages = messages
+        .filter(m => m.role === "user" || m.role === "assistant")
+        .slice(-8)
+        .map(m => ({
+          role: m.role as "user" | "assistant",
+          content: m.content.slice(0, 300),
+        }));
+
       return {
         sessionId,
+        recentMessages: recentMessages.length > 0 ? recentMessages : undefined,
         userContext: {
           name: typeof profile.name === "string" ? profile.name : undefined,
           appLanguage: getLang(),
@@ -431,7 +441,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     } catch {
       return { sessionId };
     }
-  }, [sessionId]);
+  }, [sessionId, messages]);
 
   const addUserMessage = useCallback((content: string) => {
     setMessages((prev) => [

@@ -2,13 +2,21 @@ import { log } from "@/lib/utils/logging";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/utils/rate-limit";
 import { requireAuth } from "@/lib/auth/helpers";
 import { invokeNovaLite } from "@/lib/bedrock/invoke";
+import { addMessageToMemory } from "@/lib/session/memory";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 interface VoiceChatBody {
   transcript: string;
   sessionId: string;
+  /** Recent conversation messages for context continuity */
+  recentMessages?: ChatMessage[];
   userContext?: {
     name?: string;
     appLanguage?: string;
@@ -20,27 +28,35 @@ interface VoiceChatBody {
   };
 }
 
-/** Build a voice-optimized health coaching prompt */
-function buildVoiceCoachPrompt(ctx?: VoiceChatBody["userContext"]): string {
+/** Build a voice-optimized health coaching prompt with conversation history */
+function buildVoiceCoachPrompt(
+  ctx?: VoiceChatBody["userContext"],
+  recentMessages?: ChatMessage[]
+): string {
   const parts: string[] = [
-    "You are Nova, a knowledgeable AI health and wellness coach having a voice conversation.",
+    "You are Nova — a smart, warm health coach having a real conversation.",
+    "",
+    "PERSONALITY: Think of that one friend who's really into health science — gives great specific advice but never lectures. You're direct, occasionally funny, and genuinely care.",
     "",
     "RULES:",
-    "- Give 3-5 sentences of SPECIFIC, ACTIONABLE health advice.",
-    "- Name exact foods, exercises, amounts, and timing.",
-    "- Be warm and conversational — like a smart friend who knows health science.",
-    "- If they're tired/stressed, acknowledge first, then give concrete tips.",
-    "- End with one brief follow-up question.",
+    "- 3-5 sentences. Specific foods, exercises, amounts, timing.",
+    "- Talk like a human, not a textbook. Use contractions, casual phrasing.",
+    "- REFERENCE what they said earlier in the conversation — show you remember.",
+    "- If they mentioned a meal, activity, or feeling before, build on it naturally.",
+    "- Acknowledge their feeling first (1 sentence), then give concrete tips.",
+    "- End with ONE natural follow-up question (not generic 'how can I help').",
+    "- NO bullet points, NO lists, NO 'As an AI' — just talk.",
     "- Match their language (Polish → Polish, English → English).",
-    "- NO bullet points or lists — speak naturally.",
+    "- Vary your openings. Don't always start with 'Hey [name]'.",
     "",
-    "EXAMPLES of good responses:",
-    "\"That's great you went for a run this morning! To recover well, grab some Greek yogurt with banana within 30 minutes — the protein and carbs help muscle repair. For lunch, try salmon with quinoa, about 450 calories, which gives you omega-3s for inflammation. How's your water intake been today?\"",
+    "GOOD: \"Oh nice, Chinese food! Since you mentioned your back earlier, maybe go for steamed fish instead of fried — less inflammation. And skip the heavy soy sauce, your sodium is probably high already. What are you thinking, a rice dish or noodles?\"",
     "",
-    "\"I hear you're feeling tired. Since you only got 5 hours of sleep, your body needs quick energy — try a handful of almonds with an apple right now, about 200 calories. Skip the coffee after 2pm though, it'll hurt tonight's sleep. A 15-minute walk outside would actually boost your energy more than caffeine. What time are you planning to sleep tonight?\"",
+    "GOOD: \"5 hours? Ugh, that's rough. Grab an apple with peanut butter right now — the combo of sugar and fat will carry you through the morning without a crash. And skip that second coffee after 2pm, it'll just wreck tonight's sleep too. What time you planning to call it a night?\"",
+    "",
+    "BAD: \"I understand you're feeling tired. Based on your data, I recommend consuming nutrient-dense foods. Would you like me to help?\"",
   ];
 
-  if (ctx?.name) parts.push(`\nUser's name: ${ctx.name}`);
+  if (ctx?.name) parts.push(`\nUser's name: ${ctx.name} (use it naturally, not every sentence)`);
   if (ctx?.timeOfDay) parts.push(`Time of day: ${ctx.timeOfDay}`);
   if (ctx?.dayOfWeek) parts.push(`Day: ${ctx.dayOfWeek}`);
   if (ctx?.appLanguage) {
@@ -68,6 +84,17 @@ function buildVoiceCoachPrompt(ctx?: VoiceChatBody["userContext"]): string {
   }
 
   if (ctx?.healthTwin) parts.push(`\nUser health profile:\n${ctx.healthTwin}`);
+
+  // Add conversation history for context continuity
+  if (recentMessages?.length) {
+    parts.push("\n--- CONVERSATION SO FAR (reference this naturally!) ---");
+    for (const msg of recentMessages.slice(-8)) {
+      const who = msg.role === "user" ? "User" : "Nova";
+      parts.push(`${who}: ${msg.content.slice(0, 300)}`);
+    }
+    parts.push("--- END OF HISTORY ---");
+    parts.push("IMPORTANT: Build on what was discussed above. Don't repeat yourself. Reference earlier topics naturally.");
+  }
 
   return parts.join("\n");
 }
@@ -120,7 +147,7 @@ export async function POST(request: Request): Promise<Response> {
     message: `Voice chat: "${transcript.slice(0, 60)}"`,
   });
 
-  const systemPrompt = buildVoiceCoachPrompt(body.userContext);
+  const systemPrompt = buildVoiceCoachPrompt(body.userContext, body.recentMessages);
 
   const encoder = new TextEncoder();
 
@@ -151,6 +178,21 @@ export async function POST(request: Request): Promise<Response> {
         } else {
           // Send complete text
           sse("done", { text: responseText });
+
+          // Save to session memory so text pipeline knows about voice exchanges
+          const now = new Date().toISOString();
+          addMessageToMemory(body.sessionId, {
+            id: `voice-u-${Date.now()}`,
+            role: "user",
+            content: `[voice] ${transcript}`,
+            createdAt: now,
+          });
+          addMessageToMemory(body.sessionId, {
+            id: `voice-a-${Date.now()}`,
+            role: "assistant",
+            content: responseText,
+            createdAt: now,
+          });
         }
 
         log({

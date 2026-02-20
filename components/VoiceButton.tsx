@@ -11,6 +11,8 @@ import { Capacitor } from "@capacitor/core";
 /** Context needed for real-time voice conversation */
 export interface VoiceChatContext {
   sessionId: string;
+  /** Recent messages for conversation continuity */
+  recentMessages?: { role: "user" | "assistant"; content: string }[];
   userContext?: {
     name?: string;
     appLanguage?: string;
@@ -134,6 +136,7 @@ export function VoiceButton({
         body: JSON.stringify({
           transcript,
           sessionId: ctx.sessionId,
+          recentMessages: ctx.recentMessages,
           userContext: ctx.userContext,
         }),
       });
