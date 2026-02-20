@@ -6,19 +6,7 @@ import { ANALYZER_SYSTEM_PROMPT } from "@/lib/orchestrator/prompts";
 import type { ChatMessage } from "@/lib/session/session.types";
 import { logAgentStart, logAgentDone, logAgentError } from "@/lib/utils/logging";
 
-function extractJsonObject(raw: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      return JSON.parse(match[0]) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-}
+import { extractJsonObject } from "@/lib/utils/json";
 
 function parseAnalyzerResult(raw: string): AnalyzerResult {
   const parsed = extractJsonObject(raw);

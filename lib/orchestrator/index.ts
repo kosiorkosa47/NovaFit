@@ -3,6 +3,7 @@ import { runPlanner } from "@/lib/agents/planner";
 import { runMonitor, runMonitorStreaming } from "@/lib/agents/monitor";
 import { dispatchMessage } from "@/lib/agents/dispatcher";
 import type { DispatchRoute } from "@/lib/agents/dispatcher";
+import { validatePlan } from "@/lib/agents/validator";
 import {
   generateFallbackAnalyzer,
   generateFallbackPlan,
@@ -32,6 +33,7 @@ import {
   addUserFact
 } from "@/lib/session/memory";
 import { sanitizeMessageInput, sanitizeFeedbackInput } from "@/lib/utils/sanitize";
+import { detectPromptInjection } from "@/lib/utils/prompt-guard";
 import { logOrchestrator } from "@/lib/utils/logging";
 
 function nowIso(): string {
@@ -194,6 +196,12 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   const message = sanitizeMessageInput(input.message);
   const feedback = input.feedback ? sanitizeFeedbackInput(input.feedback) : undefined;
   const timing: AgentTiming = {};
+
+  // Prompt injection guard
+  const injectionCheck = detectPromptInjection(message);
+  if (injectionCheck) {
+    logOrchestrator(`Prompt injection detected: ${injectionCheck}`, input.sessionId);
+  }
 
   logOrchestrator("Starting agent pipeline", input.sessionId);
   cleanupExpiredSessions();
@@ -407,6 +415,57 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
         message: plan.summary,
         payload: plan,
       });
+    }
+
+    // Step 3.5: Plan Validator — inter-agent verification loop
+    const healthTwinCtx = input.userContext?.healthTwin;
+    if (healthTwinCtx && (route === "full" || route === "photo")) {
+      const validatorStart = Date.now();
+      input.onEvent?.({ type: "status", message: "Verifying plan safety..." });
+
+      const validation = await validatePlan(plan, analyzer, healthTwinCtx);
+      timing.validator = Date.now() - validatorStart;
+
+      if (!validation.approved && validation.conflicts.length > 0) {
+        logOrchestrator(`Validator rejected plan: ${validation.conflicts.join("; ")}`, input.sessionId);
+
+        input.onEvent?.({
+          type: "agent_update",
+          agent: "monitor" as const,
+          message: `Plan revision: ${validation.conflicts[0]}`,
+          payload: { validation },
+        });
+
+        // Re-run Planner with conflict feedback
+        const replanStart = Date.now();
+        const conflictFeedback = `CRITICAL — The Validator agent found these conflicts with the user's profile:\n${validation.conflicts.map(c => `- ${c}`).join("\n")}\n\nYou MUST revise the plan to avoid ALL conflicts. Suggested alternatives: ${validation.suggestions.join("; ") || "choose safe substitutes"}`;
+
+        const replanResult = await runPlanner({
+          message,
+          feedback: conflictFeedback,
+          analyzer,
+          nutritionContext: plan.nutritionContext,
+          history,
+          adaptationNotes,
+          userFacts,
+          userContextStr,
+          sessionId: input.sessionId,
+        });
+        plan = replanResult.parsed;
+        plannerRaw = replanResult.raw;
+        timing.planner = (timing.planner ?? 0) + (Date.now() - replanStart);
+
+        logOrchestrator(`Planner revised plan after validation (${Date.now() - replanStart}ms)`, input.sessionId);
+
+        input.onEvent?.({
+          type: "agent_update",
+          agent: "planner" as const,
+          message: `Revised: ${plan.summary}`,
+          payload: plan,
+        });
+      } else {
+        logOrchestrator(`Validator approved plan (${timing.validator}ms)`, input.sessionId);
+      }
     }
 
     // Step 4: Monitor Agent (with streaming for text mode)

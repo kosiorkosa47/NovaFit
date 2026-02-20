@@ -129,6 +129,7 @@ export interface AgentTiming {
   dispatcher?: number;
   analyzer?: number;
   planner?: number;
+  validator?: number;
   monitor?: number;
   total?: number;
 }

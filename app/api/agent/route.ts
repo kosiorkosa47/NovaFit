@@ -12,6 +12,8 @@ import { v4 as uuidv4 } from "uuid";
 import { isValidSessionId } from "@/lib/utils/sanitize";
 import { requireAuth } from "@/lib/auth/helpers";
 import { loadSession } from "@/lib/session/memory";
+import { saveHealthTwinServer, loadHealthTwinServer } from "@/lib/health-twin/server-storage";
+import { applyProfileUpdates } from "@/lib/health-twin/storage-utils";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -181,6 +183,18 @@ export async function POST(request: Request): Promise<Response> {
               message: "Plan completed.",
               payload: result.apiResponse
             });
+
+            // Server-side Health Twin sync (fire-and-forget)
+            if (result.apiResponse.profileUpdates && authResult.userId) {
+              void (async () => {
+                try {
+                  const serverTwin = await loadHealthTwinServer(authResult.userId!);
+                  const updated = applyProfileUpdates(serverTwin, result.apiResponse.profileUpdates!);
+                  await saveHealthTwinServer(authResult.userId!, updated);
+                } catch { /* non-critical */ }
+              })();
+            }
+
             emit({ type: "done", message: "stream_complete" });
           } catch (error) {
             log({ level: "error", agent: "api", message: getSafeErrorMessage(error), sessionId });

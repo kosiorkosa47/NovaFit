@@ -8,6 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "demo:judge": "node scripts/judge-demo.mjs",
     "demo:sse": "node scripts/sse-demo.mjs",
     "cap:sync": "npx cap sync android",
@@ -57,6 +59,7 @@
     "eslint-config-next": "16.1.6",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
   }
 }
