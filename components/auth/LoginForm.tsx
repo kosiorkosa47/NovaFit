@@ -58,18 +58,24 @@ export function LoginForm() {
           const isEmpty = !existing || existing === "{}";
           if (isEmpty) {
             localStorage.setItem(TWIN_KEY, JSON.stringify({
+              version: 1,
+              createdAt: new Date().toISOString(),
+              lastUpdatedAt: new Date().toISOString(),
               conditions: ["occasional headaches"],
               allergies: ["shellfish"],
               medications: [],
-              foodLikes: ["chicken", "rice", "pasta", "avocado"],
-              foodDislikes: ["liver", "blue cheese"],
-              exerciseLikes: ["walking", "swimming"],
-              exerciseDislikes: ["running"],
+              preferences: {
+                foodLikes: ["chicken", "rice", "pasta", "avocado"],
+                foodDislikes: ["liver", "blue cheese"],
+                exerciseLikes: ["walking", "swimming"],
+                exerciseDislikes: ["running"],
+              },
               patterns: ["sleeps poorly on work nights", "energy dip around 3 PM"],
               lifestyle: ["desk/office worker", "commutes 45 min"],
               sessionSummaries: [
-                { date: new Date().toISOString(), topic: "Demo session — explore all features!" }
+                { date: new Date().toISOString(), topics: ["demo"], energyScore: 75, keyFinding: "Demo session — explore all features!" }
               ],
+              averages: { energyScore: 75, sleepHours: 7, dailySteps: 6000, sessionsCount: 1 },
             }));
           }
           // Mark onboarding as done for demo

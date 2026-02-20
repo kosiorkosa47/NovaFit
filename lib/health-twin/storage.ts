@@ -5,15 +5,55 @@ const STORAGE_KEY = "nova-health-twin";
 const MAX_SESSIONS = 20;
 const MAX_LIST_ITEMS = 30;
 
-/** Load the Health Twin profile from localStorage */
+/** Load the Health Twin profile from localStorage (defensive — handles corrupted/flat data) */
 export function loadHealthTwin(): HealthTwinProfile {
   if (typeof window === "undefined") return createEmptyProfile();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createEmptyProfile();
-    const parsed = JSON.parse(raw) as HealthTwinProfile;
-    if (parsed.version !== 1) return createEmptyProfile();
-    return parsed;
+    const p = JSON.parse(raw) as Record<string, unknown>;
+
+    const empty = createEmptyProfile();
+
+    // Migrate flat foodLikes/foodDislikes → nested preferences
+    const prefs = (p.preferences && typeof p.preferences === "object")
+      ? p.preferences as Record<string, unknown>
+      : {};
+
+    const profile: HealthTwinProfile = {
+      version: 1,
+      createdAt: (p.createdAt as string) ?? empty.createdAt,
+      lastUpdatedAt: (p.lastUpdatedAt as string) ?? empty.lastUpdatedAt,
+      conditions: Array.isArray(p.conditions) ? p.conditions as string[] : [],
+      allergies: Array.isArray(p.allergies) ? p.allergies as string[] : [],
+      medications: Array.isArray(p.medications) ? p.medications as string[] : [],
+      preferences: {
+        foodLikes: Array.isArray(prefs.foodLikes) ? prefs.foodLikes as string[] : (Array.isArray(p.foodLikes) ? p.foodLikes as string[] : []),
+        foodDislikes: Array.isArray(prefs.foodDislikes) ? prefs.foodDislikes as string[] : (Array.isArray(p.foodDislikes) ? p.foodDislikes as string[] : []),
+        exerciseLikes: Array.isArray(prefs.exerciseLikes) ? prefs.exerciseLikes as string[] : (Array.isArray(p.exerciseLikes) ? p.exerciseLikes as string[] : []),
+        exerciseDislikes: Array.isArray(prefs.exerciseDislikes) ? prefs.exerciseDislikes as string[] : (Array.isArray(p.exerciseDislikes) ? p.exerciseDislikes as string[] : []),
+      },
+      patterns: Array.isArray(p.patterns) ? p.patterns as string[] : [],
+      lifestyle: Array.isArray(p.lifestyle) ? p.lifestyle as string[] : [],
+      sessionSummaries: Array.isArray(p.sessionSummaries)
+        ? (p.sessionSummaries as Record<string, unknown>[]).map(s => ({
+            date: (s.date as string) ?? new Date().toISOString(),
+            topics: Array.isArray(s.topics) ? s.topics as string[] : (s.topic ? [s.topic as string] : []),
+            energyScore: (typeof s.energyScore === "number") ? s.energyScore : 70,
+            keyFinding: (s.keyFinding as string) ?? (s.topic as string) ?? "",
+          }))
+        : [],
+      averages: (p.averages && typeof p.averages === "object")
+        ? {
+            energyScore: ((p.averages as Record<string, unknown>).energyScore as number | null) ?? null,
+            sleepHours: ((p.averages as Record<string, unknown>).sleepHours as number | null) ?? null,
+            dailySteps: ((p.averages as Record<string, unknown>).dailySteps as number | null) ?? null,
+            sessionsCount: ((p.averages as Record<string, unknown>).sessionsCount as number) ?? 0,
+          }
+        : empty.averages,
+    };
+
+    return profile;
   } catch {
     return createEmptyProfile();
   }
