@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { getLang } from "@/lib/i18n";
+import { Capacitor } from "@capacitor/core";
 
 /** Context needed for real-time voice conversation */
 export interface VoiceChatContext {
@@ -38,7 +39,20 @@ interface VoiceButtonProps {
   disabled?: boolean;
 }
 
-const SILENCE_TIMEOUT_MS = 1800; // Faster cutoff for voice mode
+/** Get native TTS plugin if running in Capacitor */
+function getNativeTts(): { speak: (opts: { text: string; lang: string; rate: number }) => Promise<{ done: boolean }>; stop: () => Promise<void> } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    if (Capacitor.isNativePlatform()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const plugins = (Capacitor as any).Plugins;
+      if (plugins?.NativeTts) return plugins.NativeTts;
+    }
+  } catch { /* not available */ }
+  return null;
+}
+
+const hasBrowserTts = typeof window !== "undefined" && "speechSynthesis" in window;
 
 export function VoiceButton({
   onTranscript,
@@ -64,22 +78,38 @@ export function VoiceButton({
   useEffect(() => {
     return () => {
       try { recognitionRef.current?.stop(); } catch { /* */ }
+      try { getNativeTts()?.stop(); } catch { /* */ }
       window.speechSynthesis?.cancel();
     };
   }, []);
 
-  /** Speak text using browser TTS — fast, no API call */
+  /** Speak text — tries native TTS (Capacitor), then browser TTS */
   const speakResponse = useCallback((text: string) => {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1;
-    utterance.lang = getLang() === "pl" ? "pl-PL" : "en-US";
-    setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+    const lang = getLang() === "pl" ? "pl-PL" : "en-US";
+
+    // Try native Android TTS first (works in Capacitor WebView)
+    const nativeTts = getNativeTts();
+    if (nativeTts) {
+      setIsSpeaking(true);
+      console.log("[voice] Using native TTS");
+      nativeTts.speak({ text, lang, rate: 1.0 })
+        .then(() => setIsSpeaking(false))
+        .catch(() => setIsSpeaking(false));
+      return;
+    }
+
+    // Fall back to browser TTS (works in Chrome, not in WebView)
+    if (hasBrowserTts) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1;
+      utterance.lang = lang;
+      setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    }
   }, []);
 
   /** Fast voice conversation: STT → Nova 2 Lite → TTS */
