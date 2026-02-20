@@ -21,6 +21,7 @@ export interface MessageBubbleProps {
   timing?: Record<string, number>;
   validated?: boolean;
   validatorConflicts?: string[];
+  trace?: { steps: { agent: string; durationMs: number; status: string; note?: string }[]; totalMs: number; agentCount: number; usedFallback: boolean };
 }
 
 function getAgentIcon(label?: string): React.ReactElement {
@@ -43,7 +44,8 @@ export function MessageBubble({
   route,
   timing,
   validated,
-  validatorConflicts
+  validatorConflicts,
+  trace
 }: MessageBubbleProps): React.ReactElement {
   const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -108,8 +110,8 @@ export function MessageBubble({
 
         <p className="mt-1 text-[10px] text-muted-foreground">{timeStr}</p>
 
-        {(route || timing || validated !== undefined) && (
-          <AgentReasoningPanel route={route} timing={timing} validated={validated} validatorConflicts={validatorConflicts} />
+        {(route || timing || validated !== undefined || trace) && (
+          <AgentReasoningPanel route={route} timing={timing} validated={validated} validatorConflicts={validatorConflicts} trace={trace} />
         )}
       </div>
     </div>

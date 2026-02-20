@@ -284,6 +284,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       profileUpdates: monitor.profileUpdates,
       route,
       timing,
+      trace,
     };
 
     return {
@@ -679,6 +680,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     route,
     timing,
     validation: validationInfo,
+    trace: fullTrace,
   };
 
   return {

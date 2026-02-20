@@ -87,6 +87,7 @@ interface UiMessage {
   timing?: Record<string, number>;
   validated?: boolean;
   validatorConflicts?: string[];
+  trace?: { steps: { agent: string; durationMs: number; status: string; note?: string }[]; totalMs: number; agentCount: number; usedFallback: boolean };
 }
 
 const SESSION_STORAGE_KEY = "nova-health-session-id";
@@ -663,6 +664,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                         )
                       : undefined;
                     const validation = (payload as unknown as Record<string, unknown>).validation as { validated?: boolean; conflicts?: string[] } | undefined;
+                    const traceData = (payload as unknown as Record<string, unknown>).trace as UiMessage["trace"] | undefined;
                     setMessages((prev) =>
                       prev.map((m) =>
                         m.id === streamingMsgId
@@ -676,6 +678,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                               timing: timingMap,
                               validated: validation?.validated,
                               validatorConflicts: validation?.conflicts,
+                              trace: traceData,
                             }
                           : m
                       )
@@ -1232,6 +1235,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                 timing={message.timing}
                 validated={message.validated}
                 validatorConflicts={message.validatorConflicts}
+                trace={message.trace}
               />
               {message.scanResult && (
                 <NutritionScanCard data={message.scanResult} />

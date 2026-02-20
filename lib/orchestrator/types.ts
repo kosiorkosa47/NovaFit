@@ -119,6 +119,7 @@ export interface AgentApiResponse {
   route?: DispatchRoute;
   timing?: AgentTiming;
   validation?: ValidationInfo;
+  trace?: PipelineTrace;
 }
 
 export interface OrchestratorInput {

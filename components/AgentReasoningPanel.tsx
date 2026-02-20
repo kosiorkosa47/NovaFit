@@ -225,6 +225,63 @@ function ValidatorBadge({ validated, conflicts }: { validated?: boolean; conflic
   );
 }
 
+interface TraceStep {
+  agent: string;
+  durationMs: number;
+  status: string;
+  note?: string;
+}
+
+interface TraceData {
+  steps: TraceStep[];
+  totalMs: number;
+  agentCount: number;
+  usedFallback: boolean;
+}
+
+const TRACE_COLORS: Record<string, string> = {
+  dispatcher: "bg-indigo-400 dark:bg-indigo-500",
+  analyzer: "bg-orange-400 dark:bg-orange-500",
+  planner: "bg-blue-400 dark:bg-blue-500",
+  validator: "bg-teal-400 dark:bg-teal-500",
+  monitor: "bg-purple-400 dark:bg-purple-500",
+};
+
+function TraceTimeline({ trace }: { trace: TraceData }) {
+  const total = trace.totalMs || 1;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[9px] text-foreground/50">
+        <span className="font-semibold uppercase tracking-wider">Pipeline Trace</span>
+        <span>{trace.agentCount} agents &middot; {(total / 1000).toFixed(1)}s{trace.usedFallback ? " (fallback)" : ""}</span>
+      </div>
+      <div className="flex h-3 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+        {trace.steps.map((step, i) => {
+          const pct = Math.max(2, (step.durationMs / total) * 100);
+          const color = TRACE_COLORS[step.agent] ?? "bg-gray-400";
+          return (
+            <div
+              key={i}
+              className={`${color} relative transition-all duration-500`}
+              style={{ width: `${pct}%` }}
+              title={`${step.agent}: ${step.durationMs}ms (${step.status})${step.note ? ` — ${step.note}` : ""}`}
+            />
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+        {trace.steps.map((step, i) => (
+          <span key={i} className="flex items-center gap-1 text-[9px] text-foreground/60">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${TRACE_COLORS[step.agent] ?? "bg-gray-400"}`} />
+            {step.agent} {(step.durationMs / 1000).toFixed(1)}s
+            {step.status === "fallback" && <span className="text-amber-500">(fb)</span>}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface AgentReasoningPanelProps {
   agentLabel?: string;
   payload?: unknown;
@@ -232,18 +289,20 @@ interface AgentReasoningPanelProps {
   timing?: Record<string, number>;
   validated?: boolean;
   validatorConflicts?: string[];
+  trace?: TraceData;
 }
 
-export function AgentReasoningPanel({ agentLabel, payload, route, timing, validated, validatorConflicts }: AgentReasoningPanelProps) {
+export function AgentReasoningPanel({ agentLabel, payload, route, timing, validated, validatorConflicts, trace }: AgentReasoningPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
   const hasRoute = !!route;
   const hasTiming = timing && Object.keys(timing).length > 0;
   const hasValidator = validated !== undefined;
+  const hasTrace = !!trace && trace.steps.length > 0;
   const label = agentLabel?.toLowerCase() ?? "";
   const hasDetails = isAnalyzer(payload) || isPlanner(payload) || isMonitor(payload);
 
-  if (!hasDetails && !hasRoute && !hasTiming && !hasValidator) return null;
+  if (!hasDetails && !hasRoute && !hasTiming && !hasValidator && !hasTrace) return null;
 
   return (
     <div className="mt-1">
@@ -277,6 +336,7 @@ export function AgentReasoningPanel({ agentLabel, payload, route, timing, valida
             </div>
           )}
           {hasValidator && <ValidatorBadge validated={validated} conflicts={validatorConflicts} />}
+          {hasTrace && <TraceTimeline trace={trace} />}
           {label.includes("analyzer") && isAnalyzer(payload) && <AnalyzerDetails data={payload} />}
           {label.includes("planner") && isPlanner(payload) && <PlannerDetails data={payload} />}
           {label.includes("monitor") && isMonitor(payload) && <MonitorDetails data={payload} />}
