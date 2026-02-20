@@ -85,6 +85,8 @@ interface UiMessage {
   imagePreview?: string;
   route?: string;
   timing?: Record<string, number>;
+  validated?: boolean;
+  validatorConflicts?: string[];
 }
 
 const SESSION_STORAGE_KEY = "nova-health-session-id";
@@ -248,7 +250,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   const lastInputWasVoiceRef = useRef(false);
   const ttsAudioRef = useRef<AudioContext | null>(null);
 
-  // Initialize session + lang
+  // Initialize session + lang + server Health Twin hydration
   useEffect(() => {
     const existingSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
     const safeSession = ensureSessionId(existingSession ?? undefined);
@@ -265,6 +267,26 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     setLangState(getLang());
     const langHandler = (e: Event) => setLangState((e as CustomEvent).detail as Lang);
     window.addEventListener("novafit-lang-change", langHandler);
+
+    // Hydrate Health Twin from server if client-side is empty
+    const clientTwin = loadHealthTwin();
+    const isEmpty = clientTwin.conditions.length === 0 && clientTwin.allergies.length === 0 && clientTwin.patterns.length === 0 && clientTwin.lifestyle.length === 0;
+    if (isEmpty) {
+      void fetch("/api/wearable?healthTwin=1")
+        .then(r => r.json())
+        .then((data: { success?: boolean; healthTwin?: unknown }) => {
+          if (data.success && data.healthTwin) {
+            const serverTwin = data.healthTwin as unknown as ReturnType<typeof loadHealthTwin>;
+            const hasData = (serverTwin.conditions?.length ?? 0) > 0 || (serverTwin.allergies?.length ?? 0) > 0 || (serverTwin.patterns?.length ?? 0) > 0 || (serverTwin.lifestyle?.length ?? 0) > 0;
+            if (hasData) {
+              saveHealthTwin(serverTwin);
+              console.log("[health-twin] Hydrated from server:", serverTwin);
+            }
+          }
+        })
+        .catch(() => { /* non-critical */ });
+    }
+
     return () => window.removeEventListener("novafit-lang-change", langHandler);
   }, []);
 
@@ -640,6 +662,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                           Object.entries(payload.timing).filter((e): e is [string, number] => typeof e[1] === "number")
                         )
                       : undefined;
+                    const validation = (payload as unknown as Record<string, unknown>).validation as { validated?: boolean; conflicts?: string[] } | undefined;
                     setMessages((prev) =>
                       prev.map((m) =>
                         m.id === streamingMsgId
@@ -651,6 +674,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                               analyzerSummary: payload.analyzerSummary,
                               route: payload.route,
                               timing: timingMap,
+                              validated: validation?.validated,
+                              validatorConflicts: validation?.conflicts,
                             }
                           : m
                       )
@@ -1205,6 +1230,8 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
                 agentPayload={message.agentPayload}
                 route={message.route}
                 timing={message.timing}
+                validated={message.validated}
+                validatorConflicts={message.validatorConflicts}
               />
               {message.scanResult && (
                 <NutritionScanCard data={message.scanResult} />

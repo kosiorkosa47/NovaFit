@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Zap, AlertTriangle, Utensils, Dumbbell, Droplets, Moon, Brain, Route, Clock, Cpu } from "lucide-react";
+import { ChevronDown, ChevronUp, Zap, AlertTriangle, Utensils, Dumbbell, Droplets, Moon, Brain, Route, Clock, Cpu, ShieldCheck, ShieldAlert } from "lucide-react";
 
 interface AnalyzerPayload {
   summary: string;
@@ -77,6 +77,7 @@ function AgentBadges({ timing }: { timing: Record<string, number> }) {
     { key: "dispatcher", label: "Dispatcher", color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" },
     { key: "analyzer", label: "Analyzer", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
     { key: "planner", label: "Planner", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+    { key: "validator", label: "Validator", color: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300" },
     { key: "monitor", label: "Monitor", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
   ];
 
@@ -197,22 +198,52 @@ function MonitorDetails({ data }: { data: MonitorPayload }) {
   );
 }
 
+function ValidatorBadge({ validated, conflicts }: { validated?: boolean; conflicts?: string[] }) {
+  if (validated === undefined) return null;
+  if (validated) {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+        <ShieldCheck className="h-2.5 w-2.5" />
+        Plan Validated
+      </span>
+    );
+  }
+  return (
+    <div className="space-y-0.5">
+      <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+        <ShieldAlert className="h-2.5 w-2.5" />
+        Plan Revised
+      </span>
+      {conflicts && conflicts.length > 0 && (
+        <div className="ml-0.5 space-y-0.5">
+          {conflicts.slice(0, 3).map((c, i) => (
+            <p key={i} className="text-[9px] text-amber-600 dark:text-amber-400">- {c}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface AgentReasoningPanelProps {
   agentLabel?: string;
   payload?: unknown;
   route?: string;
   timing?: Record<string, number>;
+  validated?: boolean;
+  validatorConflicts?: string[];
 }
 
-export function AgentReasoningPanel({ agentLabel, payload, route, timing }: AgentReasoningPanelProps) {
+export function AgentReasoningPanel({ agentLabel, payload, route, timing, validated, validatorConflicts }: AgentReasoningPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
   const hasRoute = !!route;
   const hasTiming = timing && Object.keys(timing).length > 0;
+  const hasValidator = validated !== undefined;
   const label = agentLabel?.toLowerCase() ?? "";
   const hasDetails = isAnalyzer(payload) || isPlanner(payload) || isMonitor(payload);
 
-  if (!hasDetails && !hasRoute && !hasTiming) return null;
+  if (!hasDetails && !hasRoute && !hasTiming && !hasValidator) return null;
 
   return (
     <div className="mt-1">
@@ -245,6 +276,7 @@ export function AgentReasoningPanel({ agentLabel, payload, route, timing }: Agen
               {hasTiming && <AgentBadges timing={timing} />}
             </div>
           )}
+          {hasValidator && <ValidatorBadge validated={validated} conflicts={validatorConflicts} />}
           {label.includes("analyzer") && isAnalyzer(payload) && <AnalyzerDetails data={payload} />}
           {label.includes("planner") && isPlanner(payload) && <PlannerDetails data={payload} />}
           {label.includes("monitor") && isMonitor(payload) && <MonitorDetails data={payload} />}

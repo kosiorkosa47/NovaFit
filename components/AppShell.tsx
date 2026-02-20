@@ -10,6 +10,7 @@ import { HistoryPage } from "@/components/HistoryPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { ProfilePage } from "@/components/ProfilePage";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { OnboardingWizard, isOnboardingDone, markOnboardingDone } from "@/components/OnboardingWizard";
 import { startWebStepTracking, startNativeStepTracking } from "@/lib/sensors/health-bridge";
 
 const MIGRATION_FLAG = "nova-health-data-migrated";
@@ -19,6 +20,14 @@ export function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [voiceOutput, setVoiceOutput] = useState(true);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>();
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // Check if onboarding needed on mount
+  useEffect(() => {
+    if (session?.user && !isOnboardingDone()) {
+      setShowOnboarding(true);
+    }
+  }, [session?.user]);
 
   // Start step tracking on app load (native + web fallback)
   useEffect(() => { void startNativeStepTracking(); startWebStepTracking(); }, []);
@@ -174,8 +183,15 @@ export function AppShell() {
         </div>
       </header>
 
+      {/* Onboarding wizard — first login only */}
+      {showOnboarding && (
+        <div className="relative z-20 flex min-h-0 flex-1 flex-col bg-background">
+          <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+        </div>
+      )}
+
       {/* Content area */}
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col" style={{ display: showOnboarding ? "none" : "flex" }}>
         {/* Chat — always mounted, toggled via display for state preservation */}
         <div
           className="flex min-h-0 flex-1 flex-col"
@@ -201,7 +217,7 @@ export function AppShell() {
       </div>
 
       {/* Bottom tab navigation */}
-      <BottomTabBar activeTab={activeTab} onTabChange={setActiveTab} />
+      {!showOnboarding && <BottomTabBar activeTab={activeTab} onTabChange={setActiveTab} />}
     </div>
   );
 }

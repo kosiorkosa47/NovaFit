@@ -101,6 +101,11 @@ export interface AgentApiRequest {
   userContext?: UserContext;
 }
 
+export interface ValidationInfo {
+  validated: boolean;
+  conflicts?: string[];
+}
+
 export interface AgentApiResponse {
   success: boolean;
   sessionId: string;
@@ -113,6 +118,7 @@ export interface AgentApiResponse {
   profileUpdates?: ProfileUpdates;
   route?: DispatchRoute;
   timing?: AgentTiming;
+  validation?: ValidationInfo;
 }
 
 export interface OrchestratorInput {
@@ -134,6 +140,27 @@ export interface AgentTiming {
   total?: number;
 }
 
+export interface AgentTraceStep {
+  agent: string;
+  startMs: number;
+  durationMs: number;
+  inputTokensEstimate?: number;
+  outputTokensEstimate?: number;
+  status: "success" | "fallback" | "skipped";
+  note?: string;
+}
+
+export interface PipelineTrace {
+  traceId: string;
+  sessionId: string;
+  route: DispatchRoute;
+  steps: AgentTraceStep[];
+  totalMs: number;
+  agentCount: number;
+  usedFallback: boolean;
+  validation?: ValidationInfo;
+}
+
 export interface OrchestratorOutput {
   apiResponse: AgentApiResponse;
   analyzer: AgentStepResult<AnalyzerResult>;
@@ -141,4 +168,5 @@ export interface OrchestratorOutput {
   monitor: AgentStepResult<MonitorResult>;
   route?: DispatchRoute;
   timing?: AgentTiming;
+  trace?: PipelineTrace;
 }

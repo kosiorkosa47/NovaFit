@@ -15,12 +15,15 @@ import { getWearableSnapshot } from "@/lib/integrations/wearables.mock";
 import type {
   AgentApiResponse,
   AgentTiming,
+  AgentTraceStep,
   AnalyzerResult,
   MonitorResult,
   OrchestratorInput,
   OrchestratorOutput,
+  PipelineTrace,
   PlanRecommendation,
-  UserContext
+  UserContext,
+  ValidationInfo
 } from "@/lib/orchestrator/types";
 import {
   addAdaptationNote,
@@ -77,6 +80,18 @@ function formatUserContext(ctx?: UserContext): string {
   // Health Twin — persistent profile from past conversations
   if (ctx.healthTwin) {
     parts.push(`\n${ctx.healthTwin}`);
+    // Extract actionable patterns for predictive coaching
+    const twinLines = ctx.healthTwin.split("\n");
+    const patterns = twinLines.find(l => l.startsWith("Known patterns:"));
+    const lifestyle = twinLines.find(l => l.startsWith("Lifestyle:"));
+    if (patterns || lifestyle) {
+      parts.push("\nPREDICTIVE COACHING CONTEXT — use these proactively:");
+      if (patterns) parts.push(`  ${patterns}`);
+      if (lifestyle) parts.push(`  ${lifestyle}`);
+      if (ctx.timeOfDay) {
+        parts.push(`  Current time: ${ctx.timeOfDay} — factor this into any proactive suggestions`);
+      }
+    }
   }
   return parts.length ? parts.join("\n") : "";
 }
@@ -196,6 +211,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   const message = sanitizeMessageInput(input.message);
   const feedback = input.feedback ? sanitizeFeedbackInput(input.feedback) : undefined;
   const timing: AgentTiming = {};
+  const traceSteps: AgentTraceStep[] = [];
 
   // Prompt injection guard
   const injectionCheck = detectPromptInjection(message);
@@ -216,6 +232,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   timing.dispatcher = Date.now() - dispatchStart;
 
   const route: DispatchRoute = dispatch.route;
+  traceSteps.push({ agent: "dispatcher", startMs: dispatchStart - pipelineStart, durationMs: timing.dispatcher!, status: "success", note: `route=${route} conf=${dispatch.confidence}` });
   logOrchestrator(`Dispatcher: route=${route} confidence=${dispatch.confidence} (${timing.dispatcher}ms)`, input.sessionId);
 
   input.onEvent?.({
@@ -242,8 +259,19 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     addMessageToMemory(input.sessionId, { id: safeId(), role: "user", content: message, createdAt: nowIso() });
     addMessageToMemory(input.sessionId, { id: safeId(), role: "assistant", content: composedReply, createdAt: nowIso() });
 
+    traceSteps.push({ agent: "monitor", startMs: Date.now() - pipelineStart - (timing.monitor ?? 0), durationMs: timing.monitor ?? 0, status: "success" });
     timing.total = Date.now() - pipelineStart;
     logOrchestrator(`Pipeline complete (${route} route, ${timing.total}ms)`, input.sessionId);
+
+    const trace: PipelineTrace = {
+      traceId: safeId(),
+      sessionId: input.sessionId,
+      route,
+      steps: traceSteps,
+      totalMs: timing.total,
+      agentCount: traceSteps.length,
+      usedFallback: false,
+    };
 
     const apiResponse: AgentApiResponse = {
       success: true,
@@ -265,6 +293,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       monitor: { agent: "monitor", raw: monitorRaw, parsed: monitor },
       route,
       timing,
+      trace,
     };
   }
 
@@ -308,6 +337,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
   let plannerRaw = "";
   let monitorRaw = "";
   let usedFallback = false;
+  let validationInfo: ValidationInfo | undefined;
 
   try {
     // ── Follow-up route: skip Analyzer, use last known state ──
@@ -427,6 +457,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
       timing.validator = Date.now() - validatorStart;
 
       if (!validation.approved && validation.conflicts.length > 0) {
+        validationInfo = { validated: false, conflicts: validation.conflicts };
         logOrchestrator(`Validator rejected plan: ${validation.conflicts.join("; ")}`, input.sessionId);
 
         input.onEvent?.({
@@ -464,6 +495,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
           payload: plan,
         });
       } else {
+        validationInfo = { validated: true };
         logOrchestrator(`Validator approved plan (${timing.validator}ms)`, input.sessionId);
       }
     }
@@ -606,8 +638,33 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     createdAt: nowIso()
   });
 
+  // Build trace steps for full pipeline
+  if (timing.analyzer) {
+    traceSteps.push({ agent: "analyzer", startMs: (timing.dispatcher ?? 0), durationMs: timing.analyzer, status: usedFallback ? "fallback" : "success", inputTokensEstimate: Math.round(message.length / 4 + 200), outputTokensEstimate: Math.round(analyzerRaw.length / 4) });
+  }
+  if (timing.planner) {
+    traceSteps.push({ agent: "planner", startMs: (timing.dispatcher ?? 0) + (timing.analyzer ?? 0), durationMs: timing.planner, status: usedFallback ? "fallback" : "success" });
+  }
+  if (timing.validator) {
+    traceSteps.push({ agent: "validator", startMs: (timing.dispatcher ?? 0) + (timing.analyzer ?? 0) + (timing.planner ?? 0), durationMs: timing.validator, status: "success", note: validationInfo?.validated ? "approved" : `rejected: ${validationInfo?.conflicts?.length ?? 0} conflicts` });
+  }
+  if (timing.monitor) {
+    traceSteps.push({ agent: "monitor", startMs: (timing.dispatcher ?? 0) + (timing.analyzer ?? 0) + (timing.planner ?? 0) + (timing.validator ?? 0), durationMs: timing.monitor, status: usedFallback ? "fallback" : "success" });
+  }
+
   timing.total = Date.now() - pipelineStart;
   logOrchestrator(`Pipeline complete (${route} route, ${timing.total}ms)${usedFallback ? " [fallback]" : ""}`, input.sessionId);
+
+  const fullTrace: PipelineTrace = {
+    traceId: safeId(),
+    sessionId: input.sessionId,
+    route,
+    steps: traceSteps,
+    totalMs: timing.total,
+    agentCount: traceSteps.length,
+    usedFallback,
+    validation: validationInfo,
+  };
 
   const apiResponse: AgentApiResponse = {
     success: true,
@@ -621,6 +678,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     profileUpdates: monitor.profileUpdates,
     route,
     timing,
+    validation: validationInfo,
   };
 
   return {
@@ -630,5 +688,6 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     monitor: { agent: "monitor", raw: monitorRaw, parsed: monitor },
     route,
     timing,
+    trace: fullTrace,
   };
 }

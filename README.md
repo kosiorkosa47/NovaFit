@@ -18,6 +18,7 @@ flowchart TB
         Voice["Voice Button<br/><i>Browser STT</i>"]
         Camera["Camera / Gallery<br/><i>Meal & Label Photos</i>"]
         Sensors["Phone Sensors<br/><i>Steps · HR · Accel</i>"]
+        Onboard["Onboarding Wizard<br/><i>Health Intake</i>"]
     end
 
     Chat --> AgentAPI
@@ -25,42 +26,51 @@ flowchart TB
     Camera --> MealAPI
     Camera --> ScanAPI
     Sensors --> AgentAPI
+    Onboard --> WearableAPI
 
     subgraph Backend["<b>Vercel Serverless</b>"]
         AgentAPI["/api/agent<br/>Multi-Agent Pipeline"]
-        VoiceAPI["/api/voice-chat<br/>Fast Voice Conversation"]
+        VoiceAPI["/api/voice-chat<br/>Dispatcher + Pipeline"]
         MealAPI["/api/meal<br/>Meal Photo Analysis"]
         ScanAPI["/api/scan<br/>Label OCR + Risk"]
+        WearableAPI["/api/wearable<br/>Health Twin CRUD"]
     end
 
-    subgraph Pipeline["<b>Agent Pipeline</b> — Sequential Orchestration"]
+    subgraph Pipeline["<b>Agent Pipeline</b> — Dynamic Orchestration"]
         direction LR
-        A["Analyzer<br/>Energy Score · Signals · Risks"]
+        D["Dispatcher<br/><i>Intent Classification</i>"]
+        A["Analyzer<br/>Energy Score · Signals"]
         P["Planner<br/>Diet · Exercise · Recovery"]
-        M["Monitor<br/>Conversational Response"]
-        A -->|assessment| P -->|plan| M
+        V["Validator<br/><i>Safety Check</i>"]
+        M["Monitor<br/>Streaming Response"]
+        D -->|route| A -->|assessment| P -->|plan| V
+        V -->|approved| M
+        V -.->|conflicts| P
     end
 
     AgentAPI --> Pipeline
-    VoiceAPI --> Nova2Lite
+    VoiceAPI --> Pipeline
 
-    subgraph AWS["<b>AWS Bedrock</b>"]
+    subgraph AWS["<b>AWS Bedrock + DynamoDB</b>"]
         Nova2Lite["Nova 2 Lite<br/><i>Text + Vision + Tools</i>"]
         NovaSonic["Nova 2 Sonic<br/><i>Voice Streaming</i>"]
+        DDB["DynamoDB<br/><i>Sessions + Health Twin</i>"]
     end
 
     Pipeline --> Nova2Lite
     MealAPI --> Nova2Lite
     ScanAPI --> Nova2Lite
 
-    subgraph Memory["<b>Session Memory</b>"]
+    subgraph Memory["<b>Persistent Memory</b>"]
         Adapt["Adaptation Notes"]
         Facts["User Facts"]
         Twin["Health Twin Profile"]
+        Sessions["DynamoDB Sessions"]
     end
 
     Pipeline --> Memory
     Memory --> Pipeline
+    Memory <--> DDB
 
     style Client fill:#065f46,stroke:#059669,color:#ecfdf5
     style Backend fill:#1e3a5f,stroke:#3b82f6,color:#eff6ff
@@ -71,56 +81,94 @@ flowchart TB
 
 ## Agent Pipeline
 
-The core of NovaFit is a 3-agent sequential pipeline where each agent is a specialist with its own system prompt, input/output contract, and distinct role:
+NovaFit uses a **5-agent dynamic pipeline** with intent-based routing and inter-agent verification:
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant O as Orchestrator
+    participant D as Dispatcher
     participant A as Analyzer Agent
     participant P as Planner Agent
+    participant V as Validator Agent
     participant M as Monitor Agent
     participant B as Nova 2 Lite
     participant T as Tools
+    participant DB as DynamoDB
 
     U->>O: Message + Sensor Data
+    O->>DB: Load session (cold start recovery)
+
+    rect rgb(75, 0, 130)
+        Note over D: Stage 0 — Intent Classification
+        O->>D: User message + history
+        D->>D: Regex pre-filter (0ms)
+        alt Ambiguous
+            D->>B: Classify intent (~50 tokens)
+        end
+        D-->>O: Route: greeting|quick|followup|full|photo
+    end
+
+    alt greeting/quick route
+        O->>M: Skip to Monitor (fast path)
+        M-->>U: SSE Stream (~1s)
+    else full/photo route
 
     rect rgb(6, 95, 70)
         Note over A: Stage 1 — Health Assessment
-        O->>A: User message + wearable snapshot + history
+        O->>A: Message + wearable + image + history
         A->>B: Converse API (text or multimodal)
         B-->>A: Energy score, signals, risk flags
     end
 
     rect rgb(30, 58, 95)
         Note over P: Stage 2 — Plan Generation
-        O->>P: Assessment + user message + nutrition context
+        O->>P: Assessment + nutrition context
         P->>B: Converse API with toolConfig
         B-->>P: Tool call: get_health_data
         P->>T: Execute tool
         T-->>P: Live sensor data
-        P->>B: Tool result
-        B-->>P: Diet, exercise, hydration, recovery plan
+        B-->>P: Diet, exercise, recovery plan
+    end
+
+    rect rgb(0, 100, 100)
+        Note over V: Stage 3 — Safety Validation
+        O->>V: Plan + Health Twin profile
+        V->>V: Check allergies, dislikes, conditions
+        alt Conflicts found
+            V-->>P: Rejection + conflict details
+            P->>B: Re-generate plan avoiding conflicts
+        end
+        V-->>O: Approved
     end
 
     rect rgb(124, 45, 18)
-        Note over M: Stage 3 — Conversational Response
-        O->>M: Assessment + plan + conversation history
-        M->>B: Converse API
-        B-->>M: Natural reply + tone + adaptation note + profile updates
+        Note over M: Stage 4 — Streaming Response
+        O->>M: Assessment + validated plan + history
+        M->>B: ConverseStream API (token streaming)
+        B-->>M: Chunks → SSE to client
+        M-->>U: Real-time typing effect
     end
 
-    M-->>U: SSE Stream (reply + plan cards)
+    end
+
+    O->>DB: Persist session + Health Twin updates
 ```
 
 ### What Makes This Agentic (Not Just Prompt Chaining)
 
-- Each agent has a **distinct role and system prompt** — they are specialists, not a single LLM with different instructions
-- **Nova native tool calling** — the Planner agent dynamically decides when to call `get_health_data`, `get_nutrition_info`, or `get_daily_progress` using Bedrock's `toolConfig`
-- **Agent memory and adaptation** — each conversation builds adaptation notes that modify future behavior
-- **Health Twin** — persistent profile that accumulates user facts across sessions (allergies, preferences, conditions, patterns)
-- **Observable reasoning** — expandable panel reveals each agent's decision process
-- **Graceful degradation** — intelligent fallback with topic detection when Bedrock quota is exceeded
+- **Dynamic routing** — Dispatcher classifies intent and routes to minimum required agents (greeting = 1 agent, full = 5 agents). Saves cost and latency.
+- **Inter-agent verification loop** — Validator checks Planner's output against Health Twin (allergies, dislikes, conditions). If conflicts found, Planner re-generates. Self-correcting pipeline.
+- **Nova native tool calling** — Planner dynamically decides when to call `get_health_data`, `get_nutrition_info`, or `get_daily_progress` using Bedrock's `toolConfig`
+- **Predictive coaching** — Monitor proactively references Health Twin patterns ("I notice you sleep poorly on workdays")
+- **Token streaming** — Monitor uses `ConverseStreamCommand` for real-time typing effect
+- **Persistent DynamoDB memory** — Sessions survive Vercel cold starts. Health Twin syncs server↔client.
+- **Cross-modal continuity** — Voice and text share conversation history and Health Twin context
+- **Observable reasoning** — Expandable panel shows dispatcher route, per-agent timing, validator status, and token estimates
+- **Onboarding intake** — 3-screen wizard that immediately populates Health Twin for first-message personalization
+- **Prompt injection defense** — Regex-based detection of injection patterns before pipeline execution
+- **Graceful degradation** — Intelligent fallback with topic detection when Bedrock quota is exceeded
+- **42 unit tests** — Vitest coverage for dispatcher, validator, prompt guard, Health Twin, and JSON utilities
 
 ## Voice Architecture
 
@@ -192,18 +240,27 @@ flowchart TB
 
 | Nova Model | Usage | API |
 |---|---|---|
-| **Nova 2 Lite** | Text analysis, plan generation, conversational responses | Bedrock Converse API |
+| **Nova 2 Lite** | Dispatcher intent classification (~50 tokens) | Bedrock Converse API |
+| **Nova 2 Lite** | Analyzer health assessment | Bedrock Converse API |
+| **Nova 2 Lite** | Planner with tool calling (3 tools) | Converse API `toolConfig` |
+| **Nova 2 Lite** | Validator deep plan verification | Bedrock Converse API |
+| **Nova 2 Lite** | Monitor streaming response | `ConverseStreamCommand` |
 | **Nova 2 Lite** (multimodal) | Meal photo analysis, product label OCR | Converse API with image input |
-| **Nova 2 Lite** (tool calling) | Planner agent calls health data, nutrition, and progress tools | Converse API `toolConfig` |
 | **Nova 2 Sonic** | Premium voice streaming (bidirectional audio) | `InvokeModelWithBidirectionalStream` |
 
 ## Features
 
 ### Core
-- 3-agent pipeline: Analyzer → Planner → Monitor
-- Real-time SSE streaming with pipeline progress
-- Session memory with adaptation notes and user fact extraction
-- Health Twin — persistent health profile built across conversations
+- 5-agent pipeline: Dispatcher → Analyzer → Planner → Validator → Monitor
+- Dynamic intent routing — greeting (1 agent, ~1s) vs full pipeline (5 agents, ~5s)
+- Inter-agent verification loop — Validator catches allergy/safety conflicts, triggers re-planning
+- Real-time token streaming via `ConverseStreamCommand`
+- DynamoDB session persistence — survives Vercel cold starts
+- Health Twin — persistent health profile with server sync (cross-device)
+- Predictive coaching — proactive suggestions from Health Twin patterns
+- Onboarding wizard — 3-screen health intake for immediate personalization
+- Prompt injection defense — regex pattern detection
+- 42 unit tests (Vitest)
 - Bilingual support (English + Polish) — auto-detected from message language
 
 ### Voice AI
@@ -243,9 +300,11 @@ flowchart TB
 |---|---|
 | Frontend | Next.js 16, TypeScript, Tailwind CSS, shadcn/ui |
 | AI | AWS Bedrock — Nova 2 Lite, Nova 2 Sonic |
+| Database | AWS DynamoDB (sessions, Health Twin, auth) |
 | Auth | NextAuth v5 (Google OAuth + Credentials) |
 | Mobile | Capacitor 8.x (Android WebView + native plugins) |
 | Deploy | Vercel (serverless, Edge Network) |
+| Testing | Vitest (42 unit tests) |
 | Nutrition | USDA FoodData Central API |
 | Design | Custom liquid glass system (Apple-style) |
 
