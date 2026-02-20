@@ -9,6 +9,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { NutritionScanCard } from "@/components/NutritionScanCard";
 import { MealAnalysisCard } from "@/components/MealAnalysisCard";
 import { VoiceButton } from "@/components/VoiceButton";
+import type { VoiceChatResult, VoiceChatContext } from "@/components/VoiceButton";
 import { DEFAULT_GREETING } from "@/lib/constants";
 import type { AgentApiResponse, AgentApiRequest, SseEvent, PlanRecommendation, UserContext } from "@/lib/types";
 import type { WearableSnapshot } from "@/lib/types";
@@ -163,7 +164,11 @@ function StatusStep({ message }: { message: string }): React.ReactElement {
   );
 }
 
-function WelcomeScreen({ onVoiceTranscript }: { onVoiceTranscript: (text: string) => void }): React.ReactElement {
+function WelcomeScreen({ onVoiceTranscript, onVoiceChat, getVoiceChatContext }: {
+  onVoiceTranscript: (text: string) => void;
+  onVoiceChat?: (result: VoiceChatResult) => void;
+  getVoiceChatContext?: () => VoiceChatContext | null;
+}): React.ReactElement {
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center gap-7 px-6">
       {/* Decorative background blobs */}
@@ -187,7 +192,7 @@ function WelcomeScreen({ onVoiceTranscript }: { onVoiceTranscript: (text: string
       </div>
 
       <div className="relative">
-        <VoiceButton onTranscript={onVoiceTranscript} size="large" />
+        <VoiceButton onTranscript={onVoiceTranscript} onVoiceChat={onVoiceChat} getVoiceChatContext={getVoiceChatContext} size="large" />
       </div>
 
       <div className="relative flex flex-wrap items-center justify-center gap-2">
@@ -387,6 +392,47 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
     [voiceOutput, playTtsAudio]
   );
 
+  /** Build context for real-time voice conversation endpoint */
+  const getVoiceChatContext = useCallback((): VoiceChatContext | null => {
+    if (!sessionId) return null;
+    try {
+      const profile = JSON.parse(localStorage.getItem("nova-health-profile") || "{}") as Record<string, unknown>;
+      const goals = JSON.parse(localStorage.getItem("nova-health-goals") || "{}") as Record<string, number>;
+      let healthTwinStr: string | undefined;
+      try {
+        const twin = loadHealthTwin();
+        const formatted = formatHealthTwinForPrompt(twin);
+        if (formatted) healthTwinStr = formatted;
+      } catch { /* ignore */ }
+
+      let recentMeals: { summary: string; totalCalories: number }[] | undefined;
+      try {
+        const raw = localStorage.getItem("nova-health-recent-meals");
+        if (raw) recentMeals = JSON.parse(raw) as typeof recentMeals;
+      } catch { /* ignore */ }
+
+      const now = new Date();
+      const hour = now.getHours();
+      const timeOfDay = hour < 6 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+      return {
+        sessionId,
+        userContext: {
+          name: typeof profile.name === "string" ? profile.name : undefined,
+          appLanguage: getLang(),
+          timeOfDay,
+          dayOfWeek: days[now.getDay()],
+          goals: Object.keys(goals).length > 0 ? goals : undefined,
+          healthTwin: healthTwinStr,
+          recentMeals,
+        },
+      };
+    } catch {
+      return { sessionId };
+    }
+  }, [sessionId]);
+
   const addUserMessage = useCallback((content: string) => {
     setMessages((prev) => [
       ...prev,
@@ -455,6 +501,48 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
       return current;
     });
   }, [sessionId]);
+
+  /** Handle real-time voice conversation result — add messages to chat */
+  const handleVoiceChat = useCallback((result: VoiceChatResult) => {
+    console.log("[chat] handleVoiceChat:", result.transcript?.slice(0, 60), "→", result.responseText?.slice(0, 60));
+
+    if (!hasStarted) {
+      setMessages([{
+        id: uid(),
+        role: "assistant",
+        content: DEFAULT_GREETING,
+        timestamp: new Date().toISOString(),
+        agentLabel: "Nova"
+      }]);
+      setHasStarted(true);
+    }
+
+    // Add user message (voice transcript)
+    if (result.transcript) {
+      setMessages((prev) => [
+        ...prev,
+        { id: uid(), role: "user", content: result.transcript, timestamp: new Date().toISOString() }
+      ]);
+    }
+
+    // Add assistant message (Nova Sonic voice response)
+    if (result.responseText) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: "assistant",
+          content: result.responseText,
+          timestamp: new Date().toISOString(),
+          agentLabel: "Nova Voice",
+        }
+      ]);
+    }
+
+    resetInactivityTimer();
+    startInactivityTimer();
+    persistCurrentSession();
+  }, [hasStarted, resetInactivityTimer, startInactivityTimer, persistCurrentSession]);
 
   const handleStreamResponse = useCallback(
     async (response: Response) => {
@@ -971,7 +1059,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
   if (!hasStarted && messages.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <WelcomeScreen onVoiceTranscript={handleVoiceTranscript} />
+        <WelcomeScreen onVoiceTranscript={handleVoiceTranscript} onVoiceChat={handleVoiceChat} getVoiceChatContext={getVoiceChatContext} />
 
         {/* Input bar pinned at bottom */}
         <div className="shrink-0 border-t-[1.5px] border-white/50 bg-gradient-to-b from-white/65 to-white/45 px-3 pb-2 pt-2 shadow-[inset_0_2px_0_rgba(255,255,255,0.7),0_-8px_32px_-4px_rgba(16,185,129,0.06)] backdrop-blur-[50px] backdrop-saturate-[250%] backdrop-brightness-[1.15] dark:border-emerald-800/20 dark:from-[rgba(16,185,129,0.10)] dark:to-[rgba(2,44,34,0.50)] dark:shadow-[inset_0_2px_0_rgba(255,255,255,0.08),0_-8px_32px_-4px_rgba(0,0,0,0.3)]">
@@ -1079,7 +1167,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
           </div>
         )}
         <div className="mx-auto flex max-w-2xl items-end gap-1.5">
-          <VoiceButton onTranscript={handleVoiceTranscript} disabled={isStreaming} />
+          <VoiceButton onTranscript={handleVoiceTranscript} onVoiceChat={handleVoiceChat} getVoiceChatContext={getVoiceChatContext} disabled={isStreaming} />
 
           <div className="relative" ref={cameraMenuRef}>
             <button
