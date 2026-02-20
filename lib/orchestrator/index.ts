@@ -76,6 +76,47 @@ function formatUserContext(ctx?: UserContext): string {
   return parts.length ? parts.join("\n") : "";
 }
 
+/** Post-process energy score — prevent wild swings between conversation turns.
+ *  Nova 2 Lite tends to give aggressively low scores (0-15) on follow-ups.
+ *  This stabilizer enforces consistency at the code level. */
+function stabilizeEnergyScore(
+  rawScore: number,
+  adaptationNotes: string[],
+  currentMessage: string
+): number {
+  // Find the most recent previous energy score from adaptation notes
+  let prevScore: number | null = null;
+  for (const note of adaptationNotes) {
+    const match = note.match(/Previous energy score:\s*(\d+)\/100/);
+    if (match) {
+      prevScore = parseInt(match[1], 10);
+    }
+  }
+
+  // Floor: scores below 20 only for genuine emergencies
+  const emergencyPattern = /(?:emergency|faint|unconscious|hospital|ambulance|chest\s*pain|can'?t\s*breathe|severe|collapsed|dizzy|blacking\s*out)/i;
+  const isEmergency = emergencyPattern.test(currentMessage);
+  const minScore = isEmergency ? 5 : 20;
+
+  let score = Math.max(rawScore, minScore);
+
+  // If we have a previous score, limit the change per turn
+  if (prevScore !== null) {
+    const worseningPattern = /(?:worse|terrible|awful|horrible|can'?t\s*move|much\s*more\s*tired|significantly\s*worse|really\s*bad)/i;
+    const improvingPattern = /(?:better|great|amazing|wonderful|much\s*better|recovered|well[\s-]*rested|energized|fantastic)/i;
+
+    const maxDrop = worseningPattern.test(currentMessage) ? 30 : 15;
+    const maxRise = improvingPattern.test(currentMessage) ? 30 : 15;
+
+    const lowerBound = Math.max(prevScore - maxDrop, minScore);
+    const upperBound = Math.min(prevScore + maxRise, 100);
+
+    score = Math.max(lowerBound, Math.min(upperBound, score));
+  }
+
+  return score;
+}
+
 function buildAgentResponseText(
   _analyzer: AnalyzerResult,
   _plan: PlanRecommendation,
@@ -170,6 +211,13 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
     analyzer = analyzerResult.parsed;
     analyzerRaw = analyzerResult.raw;
 
+    // Stabilize energy score — prevent wild swings between turns
+    const rawEnergyScore = analyzer.energyScore;
+    analyzer.energyScore = stabilizeEnergyScore(rawEnergyScore, adaptationNotes, message);
+    if (rawEnergyScore !== analyzer.energyScore) {
+      logOrchestrator(`Energy score stabilized: ${rawEnergyScore} → ${analyzer.energyScore} (prev notes: ${adaptationNotes.length})`, input.sessionId);
+    }
+
     logOrchestrator(`Image passed to analyzer: ${input.image ? `${input.image.format}, ${input.image.bytes.length} bytes` : "none"}`, input.sessionId);
 
     input.onEvent?.({
@@ -235,6 +283,7 @@ export async function orchestrateAgents(input: OrchestratorInput): Promise<Orche
 
     input.onEvent?.({ type: "status", message: "Analyzing your current state..." });
     analyzer = generateFallbackAnalyzer(message, wearable, input.sessionId);
+    analyzer.energyScore = stabilizeEnergyScore(analyzer.energyScore, adaptationNotes, message);
     analyzerRaw = JSON.stringify(analyzer);
 
     input.onEvent?.({
