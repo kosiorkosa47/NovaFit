@@ -132,6 +132,8 @@ export function VoiceButton({
   /** Real-time voice conversation via SSE streaming */
   const sendToVoiceChat = useCallback(async (audioBlob: Blob) => {
     setIsProcessing(true);
+    // Claim the transcript slot immediately — prevents 12s STT fallback from firing
+    transcriptSentRef.current = true;
     try {
       const pcmBase64 = await encodeToPcmBase64(audioBlob);
       console.log("[voice-chat] PCM base64:", (pcmBase64.length / 1024).toFixed(0), "KB");
@@ -235,12 +237,23 @@ export function VoiceButton({
       if (onVoiceChatRef.current && (transcript || responseText)) {
         onVoiceChatRef.current({ transcript, responseText });
       } else if (transcript) {
+        // Reset flag so emitTranscript can send
+        transcriptSentRef.current = false;
         emitTranscript(transcript);
+      } else {
+        // Nova heard nothing (silence) — try browser STT fallback
+        if (sttResultRef.current) {
+          transcriptSentRef.current = false;
+          emitTranscript(sttResultRef.current);
+        } else {
+          toast.error("Didn't catch that. Try speaking closer to the mic.");
+        }
       }
     } catch (err) {
       console.error("[voice-chat] Error:", err);
       setIsPlaying(false);
-      // Fallback: use browser STT if available
+      // Reset flag and try browser STT fallback
+      transcriptSentRef.current = false;
       if (sttResultRef.current) {
         emitTranscript(sttResultRef.current);
       } else {
