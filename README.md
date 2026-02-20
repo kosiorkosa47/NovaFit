@@ -8,67 +8,184 @@ NovaFit is a 3-agent AI wellness coach that **sees your meals**, **hears your vo
 
 ---
 
-## Architecture
+## Architecture Overview
 
+```mermaid
+flowchart TB
+    subgraph Client["<b>NovaFit Client</b> — Next.js 16 + Capacitor Android"]
+        direction LR
+        Chat["Chat UI<br/><i>SSE Streaming</i>"]
+        Voice["Voice Button<br/><i>Browser STT</i>"]
+        Camera["Camera / Gallery<br/><i>Meal & Label Photos</i>"]
+        Sensors["Phone Sensors<br/><i>Steps · HR · Accel</i>"]
+    end
+
+    Chat --> AgentAPI
+    Voice --> VoiceAPI
+    Camera --> MealAPI
+    Camera --> ScanAPI
+    Sensors --> AgentAPI
+
+    subgraph Backend["<b>Vercel Serverless</b>"]
+        AgentAPI["/api/agent<br/>Multi-Agent Pipeline"]
+        VoiceAPI["/api/voice-chat<br/>Fast Voice Conversation"]
+        MealAPI["/api/meal<br/>Meal Photo Analysis"]
+        ScanAPI["/api/scan<br/>Label OCR + Risk"]
+    end
+
+    subgraph Pipeline["<b>Agent Pipeline</b> — Sequential Orchestration"]
+        direction LR
+        A["Analyzer<br/>Energy Score · Signals · Risks"]
+        P["Planner<br/>Diet · Exercise · Recovery"]
+        M["Monitor<br/>Conversational Response"]
+        A -->|assessment| P -->|plan| M
+    end
+
+    AgentAPI --> Pipeline
+    VoiceAPI --> Nova2Lite
+
+    subgraph AWS["<b>AWS Bedrock</b>"]
+        Nova2Lite["Nova 2 Lite<br/><i>Text + Vision + Tools</i>"]
+        NovaSonic["Nova 2 Sonic<br/><i>Voice Streaming</i>"]
+    end
+
+    Pipeline --> Nova2Lite
+    MealAPI --> Nova2Lite
+    ScanAPI --> Nova2Lite
+
+    subgraph Memory["<b>Session Memory</b>"]
+        Adapt["Adaptation Notes"]
+        Facts["User Facts"]
+        Twin["Health Twin Profile"]
+    end
+
+    Pipeline --> Memory
+    Memory --> Pipeline
+
+    style Client fill:#065f46,stroke:#059669,color:#ecfdf5
+    style Backend fill:#1e3a5f,stroke:#3b82f6,color:#eff6ff
+    style Pipeline fill:#7c2d12,stroke:#ea580c,color:#fff7ed
+    style AWS fill:#4a1d96,stroke:#8b5cf6,color:#f5f3ff
+    style Memory fill:#713f12,stroke:#d97706,color:#fffbeb
 ```
-                         ┌─────────────────────────────────────────┐
-                         │            NovaFit Client               │
-                         │  Next.js 16 + Capacitor Android App     │
-                         │                                         │
-                         │  ┌──────────┐ ┌────────┐ ┌───────────┐ │
-                         │  │ Chat UI  │ │ Voice  │ │ Camera/   │ │
-                         │  │ (SSE)    │ │ Button │ │ Gallery   │ │
-                         │  └────┬─────┘ └───┬────┘ └─────┬─────┘ │
-                         │       │           │            │        │
-                         │  ┌────┴───────────┴────────────┴─────┐  │
-                         │  │     Phone Sensors (Capacitor)     │  │
-                         │  │  Steps · Heart Rate · Accelerometer│  │
-                         │  └───────────────┬───────────────────┘  │
-                         └──────────────────┼──────────────────────┘
-                                            │
-                                   ┌────────▼────────┐
-                                   │   API Gateway    │
-                                   │  /api/agent      │
-                                   │  /api/meal       │
-                                   │  /api/scan       │
-                                   │  /api/voice      │
-                                   │  /api/tts        │
-                                   └────────┬────────┘
-                                            │
-                    ┌───────────────────────┬┴───────────────────────┐
-                    │                       │                        │
-           ┌────────▼────────┐    ┌─────────▼─────────┐   ┌─────────▼─────────┐
-           │ ANALYZER AGENT  │    │  PLANNER AGENT     │   │  MONITOR AGENT    │
-           │                 │    │                    │   │                   │
-           │ Nova 2 Lite     │───▶│ Nova 2 Lite        │──▶│ Nova 2 Lite       │
-           │                 │    │ + Tool Calling     │   │                   │
-           │ Energy scoring  │    │                    │   │ Conversational    │
-           │ Signal detection│    │ ┌────────────────┐ │   │ response + tone   │
-           │ Risk flagging   │    │ │ TOOLS:         │ │   │ adaptation        │
-           │ Multimodal      │    │ │ get_health_data│ │   │ memory learning   │
-           │ (image input)   │    │ │ get_nutrition  │ │   │                   │
-           │                 │    │ │ get_progress   │ │   │                   │
-           └─────────────────┘    │ └────────────────┘ │   └───────────────────┘
-                                  └────────────────────┘
-                                            │
-                              ┌──────────────┴──────────────┐
-                              │     FALLBACK ENGINE          │
-                              │  Template-based responses    │
-                              │  when Bedrock quota exceeded │
-                              │  (seamless, user never knows)│
-                              └─────────────────────────────┘
 
-     ┌───────────────────┐          ┌───────────────────┐
-     │  NOVA 2 SONIC     │          │  MULTIMODAL       │
-     │  Voice Pipeline   │          │  Meal Analysis    │
-     │                   │          │  Label Scanning   │
-     │  STT → 3 Agents   │          │                   │
-     │  → TTS Response   │          │  Photo → Nova 2   │
-     │                   │          │  Lite Vision →    │
-     │  Bidirectional    │          │  Calories/Macros  │
-     │  audio streaming  │          │  + Non-food       │
-     └───────────────────┘          │  detection        │
-                                    └───────────────────┘
+## Agent Pipeline
+
+The core of NovaFit is a 3-agent sequential pipeline where each agent is a specialist with its own system prompt, input/output contract, and distinct role:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant O as Orchestrator
+    participant A as Analyzer Agent
+    participant P as Planner Agent
+    participant M as Monitor Agent
+    participant B as Nova 2 Lite
+    participant T as Tools
+
+    U->>O: Message + Sensor Data
+
+    rect rgb(6, 95, 70)
+        Note over A: Stage 1 — Health Assessment
+        O->>A: User message + wearable snapshot + history
+        A->>B: Converse API (text or multimodal)
+        B-->>A: Energy score, signals, risk flags
+    end
+
+    rect rgb(30, 58, 95)
+        Note over P: Stage 2 — Plan Generation
+        O->>P: Assessment + user message + nutrition context
+        P->>B: Converse API with toolConfig
+        B-->>P: Tool call: get_health_data
+        P->>T: Execute tool
+        T-->>P: Live sensor data
+        P->>B: Tool result
+        B-->>P: Diet, exercise, hydration, recovery plan
+    end
+
+    rect rgb(124, 45, 18)
+        Note over M: Stage 3 — Conversational Response
+        O->>M: Assessment + plan + conversation history
+        M->>B: Converse API
+        B-->>M: Natural reply + tone + adaptation note + profile updates
+    end
+
+    M-->>U: SSE Stream (reply + plan cards)
+```
+
+### What Makes This Agentic (Not Just Prompt Chaining)
+
+- Each agent has a **distinct role and system prompt** — they are specialists, not a single LLM with different instructions
+- **Nova native tool calling** — the Planner agent dynamically decides when to call `get_health_data`, `get_nutrition_info`, or `get_daily_progress` using Bedrock's `toolConfig`
+- **Agent memory and adaptation** — each conversation builds adaptation notes that modify future behavior
+- **Health Twin** — persistent profile that accumulates user facts across sessions (allergies, preferences, conditions, patterns)
+- **Observable reasoning** — expandable panel reveals each agent's decision process
+- **Graceful degradation** — intelligent fallback with topic detection when Bedrock quota is exceeded
+
+## Voice Architecture
+
+NovaFit uses a hybrid voice pipeline optimized for speed (~2s total latency):
+
+```mermaid
+flowchart LR
+    subgraph Phone["User's Phone"]
+        Mic["Microphone"]
+        STT["Browser<br/>SpeechRecognition<br/><i>instant</i>"]
+        TTS["Native Android TTS<br/><i>Capacitor Plugin</i>"]
+        Speaker["Speaker"]
+    end
+
+    subgraph Server["Vercel + AWS"]
+        API["/api/voice-chat"]
+        Nova["Nova 2 Lite<br/><i>~1.8s</i>"]
+    end
+
+    Mic -->|audio| STT
+    STT -->|transcript + history| API
+    API -->|system prompt +<br/>conversation context| Nova
+    Nova -->|coaching response| API
+    API -->|SSE response text| TTS
+    TTS -->|audio| Speaker
+
+    style Phone fill:#065f46,stroke:#059669,color:#ecfdf5
+    style Server fill:#4a1d96,stroke:#8b5cf6,color:#f5f3ff
+```
+
+**Key design decisions:**
+- Browser STT is instant (no network round-trip for transcription)
+- Voice shares full conversation history with text chat — context is never lost
+- Voice responses are saved to server-side session memory so the text pipeline knows about voice interactions
+- Native Android TTS via custom Capacitor plugin (browser `speechSynthesis` unavailable in WebView)
+- Nova 2 Sonic available as premium TTS option for text-initiated responses
+
+## Multimodal Understanding
+
+```mermaid
+flowchart TB
+    subgraph Input["Photo Input"]
+        MealPhoto["Meal Photo"]
+        LabelPhoto["Product Label"]
+    end
+
+    subgraph Analysis["Nova 2 Lite Vision"]
+        MealAI["Meal Analysis<br/><i>Identify dishes, estimate portions</i>"]
+        LabelAI["Label OCR + Scan<br/><i>Read ingredients, detect risks</i>"]
+        NonFood["Non-Food Detection<br/><i>Safety: score 0 + warning</i>"]
+    end
+
+    subgraph Output["Results"]
+        Calories["Calories & Macros<br/><i>Per item + total</i>"]
+        Score["Health Score<br/><i>0-100 with explanation</i>"]
+        Context["Saved to Context<br/><i>Agent knows what you ate</i>"]
+    end
+
+    MealPhoto --> MealAI --> Calories --> Context
+    LabelPhoto --> LabelAI --> Score
+    MealPhoto --> NonFood
+
+    style Input fill:#713f12,stroke:#d97706,color:#fffbeb
+    style Analysis fill:#4a1d96,stroke:#8b5cf6,color:#f5f3ff
+    style Output fill:#065f46,stroke:#059669,color:#ecfdf5
 ```
 
 ## Amazon Nova Integration
@@ -76,61 +193,47 @@ NovaFit is a 3-agent AI wellness coach that **sees your meals**, **hears your vo
 | Nova Model | Usage | API |
 |---|---|---|
 | **Nova 2 Lite** | Text analysis, plan generation, conversational responses | Bedrock Converse API |
-| **Nova 2 Lite** (multimodal) | Meal photo analysis, product label OCR | Bedrock Converse API with image input |
-| **Nova 2 Lite** (tool calling) | Planner agent dynamically calls health data, nutrition, and progress tools | Bedrock Converse API `toolConfig` |
-| **Nova 2 Sonic** | Voice-to-voice coaching (STT + TTS) | Bedrock `InvokeModelWithBidirectionalStream` |
-
-### Agent Pipeline Detail
-
-1. **User** sends message (text, voice, or photo)
-2. **Analyzer Agent** evaluates wearable data + conversation history + user message → energy score, key signals, risk flags
-3. **Planner Agent** creates personalized diet/exercise/recovery plan using **Nova tool calling** to fetch real-time health data and nutrition info
-4. **Monitor Agent** composes a natural conversational response, learns from interaction (adaptation notes)
-5. Response streams back via **SSE** with real-time agent status updates visible in UI
-6. **Fallback Engine** seamlessly activates if Bedrock quota is exceeded — user never sees an error
-
-### What Makes This Agentic (Not Just Prompt Chaining)
-
-- Each agent has a **distinct role and system prompt** — they are specialists, not a single LLM with different instructions
-- **Nova native tool calling** — the Planner agent dynamically decides when to call `get_health_data`, `get_nutrition_info`, or `get_daily_progress` using Bedrock's `toolConfig`
-- **Agent memory and adaptation** — each conversation builds adaptation notes that modify future behavior
-- **Observable reasoning** — expandable "Show reasoning" panel reveals each agent's decision process (energy gauge, signals, tone, learning)
-- **Graceful degradation** — intelligent fallback that uses wearable data + topic detection when the AI service is unavailable
+| **Nova 2 Lite** (multimodal) | Meal photo analysis, product label OCR | Converse API with image input |
+| **Nova 2 Lite** (tool calling) | Planner agent calls health data, nutrition, and progress tools | Converse API `toolConfig` |
+| **Nova 2 Sonic** | Premium voice streaming (bidirectional audio) | `InvokeModelWithBidirectionalStream` |
 
 ## Features
 
 ### Core
 - 3-agent pipeline: Analyzer → Planner → Monitor
-- Real-time SSE streaming with agent step visibility
+- Real-time SSE streaming with pipeline progress
 - Session memory with adaptation notes and user fact extraction
+- Health Twin — persistent health profile built across conversations
 - Bilingual support (English + Polish) — auto-detected from message language
 
-### Voice AI (Nova 2 Sonic)
-- Voice transcription flows through the full 3-agent pipeline
-- Nova Sonic TTS speaks the agent's response back
-- Browser SpeechSynthesis as TTS fallback
+### Voice AI
+- Browser STT (instant) → Nova 2 Lite → native Android TTS (~2s total)
+- Full conversation context shared between voice and text
+- Voice responses saved to session memory for cross-modal continuity
+- Nova 2 Sonic available for premium TTS
 
 ### Multimodal Understanding
 - Meal photo analysis with calorie/macro breakdown
 - Product label OCR with ingredient risk detection
-- Non-food product detection (compressed air cans, chemicals → score 0 + warning)
-- Meal context persists — agent knows what you ate when you ask follow-up questions
+- Non-food product detection (chemicals, non-edibles → score 0 + warning)
+- Meal context persists — agent knows what you ate for follow-up questions
 
 ### Mobile (Capacitor Android)
 - Native Android APK wrapping the web app
 - Real phone sensors: step counter, heart rate, accelerometer
+- Native TTS plugin for voice output in WebView
 - Auto-detection: native sensors → web sensors → mock data
 
 ### Health Dashboard
-- Expandable metric cards with weekly bar charts
+- 6 metric cards with weekly bar charts
 - Daily goal tracking (steps, water, sleep, exercise, calories)
-- Trend analysis with real sensor data
+- Distance tracking in km
 
 ### Security
 - NextAuth v5 (Google OAuth + email/password)
 - bcrypt password hashing (cost 12)
 - Zod input validation on all API endpoints
-- Rate limiting per user
+- Rate limiting per user per IP
 - Server-only Bedrock calls (AWS credentials never exposed)
 - CSRF protection, httpOnly cookies
 
@@ -141,8 +244,8 @@ NovaFit is a 3-agent AI wellness coach that **sees your meals**, **hears your vo
 | Frontend | Next.js 16, TypeScript, Tailwind CSS, shadcn/ui |
 | AI | AWS Bedrock — Nova 2 Lite, Nova 2 Sonic |
 | Auth | NextAuth v5 (Google OAuth + Credentials) |
-| Mobile | Capacitor 8.x (Android WebView) |
-| Deploy | Vercel (serverless) |
+| Mobile | Capacitor 8.x (Android WebView + native plugins) |
+| Deploy | Vercel (serverless, Edge Network) |
 | Nutrition | USDA FoodData Central API |
 | Design | Custom liquid glass system (Apple-style) |
 
@@ -206,9 +309,10 @@ ANDROID_SDK_ROOT=~/.local/android-sdk \
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/agent` | POST | Multi-agent pipeline (SSE or JSON) |
+| `/api/voice-chat` | POST | Fast voice conversation (SSE) |
 | `/api/meal` | POST | Meal photo analysis (multipart) |
 | `/api/scan` | POST | Product label scan (multipart or text) |
-| `/api/voice` | POST | Nova Sonic voice conversation |
+| `/api/voice` | POST | Nova Sonic voice streaming |
 | `/api/tts` | POST | Text-to-speech via Nova Sonic |
 | `/api/wearable` | GET | Wearable health data |
 | `/api/register` | POST | User registration |
