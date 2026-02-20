@@ -170,6 +170,7 @@ export function VoiceButton({
       let buffer = "";
       let transcript = "";
       let responseText = "";
+      let audioChunkCount = 0;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -198,14 +199,17 @@ export function VoiceButton({
 
             if (eventType === "audio" && parsed.chunk) {
               player.feed(parsed.chunk);
+              audioChunkCount++;
             }
 
             if (eventType === "transcript" && parsed.text) {
               transcript = parsed.text;
+              console.log("[voice-chat] transcript:", parsed.text.slice(0, 60));
             }
 
             if (eventType === "response_text" && parsed.text) {
               responseText = parsed.text;
+              console.log("[voice-chat] response:", parsed.text.slice(0, 80));
             }
 
             if (eventType === "error") {
@@ -231,7 +235,7 @@ export function VoiceButton({
       await player.stop();
       setIsPlaying(false);
 
-      console.log("[voice-chat] Complete:", { transcript: transcript.slice(0, 80), responseText: responseText.slice(0, 80) });
+      console.log("[voice-chat] Complete:", { audioChunks: audioChunkCount, transcript: transcript.slice(0, 80), responseText: responseText.slice(0, 80) });
 
       // Report results
       if (onVoiceChatRef.current && (transcript || responseText)) {
