@@ -129,7 +129,7 @@ export function AppShell() {
   }, []);
 
   return (
-    <div className="app-shell flex h-dvh flex-col overflow-hidden bg-background">
+    <div className="app-shell flex h-dvh flex-col overflow-hidden bg-background" role="application" aria-label="NovaFit Wellness Coach">
       {/* Ambient floating orbs */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden="true">
         <div className="ambient-orb ambient-orb-1" />
@@ -158,6 +158,7 @@ export function AppShell() {
           <button
             onClick={startNewChat}
             className="flex h-9 items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 text-emerald-700 transition-colors hover:bg-emerald-500/20 active:scale-95 dark:text-emerald-400"
+            aria-label="Start new chat"
             title="New chat"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -171,6 +172,7 @@ export function AppShell() {
             <button
               onClick={() => void signOut({ callbackUrl: "/auth/login" })}
               className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Sign out"
               title="Sign out"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -191,7 +193,7 @@ export function AppShell() {
       )}
 
       {/* Content area */}
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col" style={{ display: showOnboarding ? "none" : "flex" }}>
+      <main className="relative z-10 flex min-h-0 flex-1 flex-col" style={{ display: showOnboarding ? "none" : "flex" }}>
         {/* Chat — always mounted, toggled via display for state preservation */}
         <div
           className="flex min-h-0 flex-1 flex-col"
@@ -214,7 +216,7 @@ export function AppShell() {
         {activeTab === "profile" && (
           <div className="animate-tab-fade flex min-h-0 flex-1 flex-col"><ProfilePage /></div>
         )}
-      </div>
+      </main>
 
       {/* Bottom tab navigation */}
       {!showOnboarding && <BottomTabBar activeTab={activeTab} onTabChange={setActiveTab} />}

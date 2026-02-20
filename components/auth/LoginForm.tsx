@@ -12,6 +12,7 @@ export function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,6 +36,54 @@ export function LoginForm() {
       setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDemo() {
+    setDemoLoading(true);
+    setError("");
+    try {
+      const result = await signIn("credentials", {
+        email: "demo@novafit.ai",
+        password: "demo1234",
+        redirect: false,
+      });
+      if (result?.error) {
+        setError("Demo login failed. Please try again.");
+      } else {
+        // Pre-populate Health Twin for demo user
+        try {
+          const TWIN_KEY = "nova-health-twin";
+          const existing = localStorage.getItem(TWIN_KEY);
+          const isEmpty = !existing || existing === "{}";
+          if (isEmpty) {
+            localStorage.setItem(TWIN_KEY, JSON.stringify({
+              conditions: ["occasional headaches"],
+              allergies: ["shellfish"],
+              medications: [],
+              foodLikes: ["chicken", "rice", "pasta", "avocado"],
+              foodDislikes: ["liver", "blue cheese"],
+              exerciseLikes: ["walking", "swimming"],
+              exerciseDislikes: ["running"],
+              patterns: ["sleeps poorly on work nights", "energy dip around 3 PM"],
+              lifestyle: ["desk/office worker", "commutes 45 min"],
+              sessionSummaries: [
+                { date: new Date().toISOString(), topic: "Demo session — explore all features!" }
+              ],
+            }));
+          }
+          // Mark onboarding as done for demo
+          localStorage.setItem("nova-onboarding-done", "1");
+          localStorage.setItem("nova-user-name", "Demo User");
+          localStorage.setItem("nova-daily-goals", JSON.stringify({ calories: 2000, steps: 8000, sleep: 8, water: 8 }));
+        } catch { /* localStorage unavailable */ }
+        router.push("/");
+        router.refresh();
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setDemoLoading(false);
     }
   }
 
@@ -82,10 +131,23 @@ export function LoginForm() {
             {googleLoading ? "Redirecting..." : "Continue with Google"}
           </button>
 
+          {/* Demo button */}
+          <button
+            type="button"
+            onClick={handleDemo}
+            disabled={demoLoading}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            {demoLoading ? "Starting demo..." : "Try Demo — No signup needed"}
+          </button>
+
           {/* Divider */}
           <div className="my-5 flex items-center gap-3">
             <div className="h-px flex-1 bg-border" />
-            <span className="text-xs text-muted-foreground">Or continue with email</span>
+            <span className="text-xs text-muted-foreground">Or sign in with your account</span>
             <div className="h-px flex-1 bg-border" />
           </div>
 

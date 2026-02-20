@@ -8,89 +8,108 @@ Copy-paste these sections into the Devpost submission form.
 NovaFit — Multi-Agent AI Wellness Coach
 
 ## Tagline (one line)
-A 3-agent AI wellness coach that sees your meals, hears your voice, reads your phone sensors, and learns who you are — powered entirely by Amazon Nova.
+A 5-agent AI wellness coach that sees your meals, hears your voice, reads your phone sensors, and learns who you are — powered entirely by Amazon Nova.
 
 ---
 
 ## Inspiration
 
-Health apps today are either too generic ("drink 8 glasses of water") or too complex for everyday use. We wanted something different: an AI coach that actually *knows you* — your sleep patterns, your food allergies, your bad back, your hatred of running — and adapts in real time. Not a chatbot with canned responses, but a multi-agent system where specialized AI agents collaborate to understand your state, build a personalized plan, and talk to you like a knowledgeable friend.
+Health apps today are either too generic ("drink 8 glasses of water") or too complex for everyday use. We wanted something different: an AI coach that actually *knows you* — your sleep patterns, your food allergies, your bad back, your hatred of running — and adapts in real time. Not a chatbot with canned responses, but a multi-agent system where specialized AI agents collaborate, verify each other's work, and talk to you like a knowledgeable friend.
 
 ## What it does
 
-NovaFit is a multi-agent wellness coaching system with three specialized Amazon Nova agents working in sequence:
+NovaFit is a **5-agent dynamic wellness coaching pipeline** where each agent has a specialized role:
 
-1. **Analyzer Agent** — Reads your phone sensors (steps, heart rate, sleep) and cross-references with what you tell it. Produces an energy score and identifies key health signals. Handles images too — you can send a meal photo and it estimates calories and macros using Nova's multimodal vision.
+1. **Dispatcher** — Classifies user intent (greeting, quick question, follow-up, photo, full health request) and routes to the minimum required agents. A simple "hello" skips the full pipeline (~1s vs ~5s). Uses regex pre-filtering + Nova 2 Lite for ambiguous cases.
 
-2. **Planner Agent** — Takes the Analyzer's assessment and builds a concrete plan for *today*: specific meals with calorie counts, exercises matched to your energy level, hydration and recovery tips. Uses **Nova native tool calling** to dynamically fetch real-time health data and nutrition information.
+2. **Analyzer Agent** — Cross-references phone sensor data (steps, heart rate, sleep, stress) with what you tell it. Produces an energy score (0-100) and identifies key health signals and risk flags. Handles multimodal input — send a meal photo and it estimates calories/macros using Nova's vision.
 
-3. **Monitor Agent** — Composes a warm, conversational response and learns from every interaction. It builds a **Health Twin** — a persistent profile of your conditions, allergies, preferences, and behavioral patterns that grows smarter with every conversation.
+3. **Planner Agent** — Takes the Analyzer's assessment and builds a concrete plan for *today*: specific meals with calorie counts, exercises matched to your energy level, hydration and recovery tips. Uses **Nova native tool calling** (`toolConfig`) to dynamically decide when to fetch real-time health data or nutrition information.
 
-You can interact via text, voice (Nova 2 Sonic), or by photographing your meals. The entire agent reasoning process is transparent — you can expand "Show reasoning" to see exactly how each agent reached its conclusions.
+4. **Validator Agent** — Cross-checks the Planner's recommendations against your Health Twin profile (allergies, food dislikes, health conditions). If conflicts are found (e.g., suggesting shellfish to someone allergic), it rejects the plan and forces the Planner to regenerate. This is a **self-correcting verification loop**.
+
+5. **Monitor Agent** — Composes a warm, conversational response with **real-time token streaming** (typing effect). Extracts new facts about you after every interaction, building the **Health Twin** — a persistent profile of conditions, allergies, preferences, and behavioral patterns that grows smarter over time. Proactively coaches based on detected patterns ("I notice you sleep poorly on work nights — let's plan ahead").
+
+**Additional features:**
+- **Voice coaching** — Browser speech recognition (instant) → Nova 2 Lite → native Android TTS (~2s total)
+- **Meal photo analysis** — Photograph your food for instant calorie/macro breakdown with health scoring
+- **Product label scanning** — OCR ingredients from product labels, detect allergens and health risks
+- **Health Dashboard** — 6 metric cards with weekly charts and daily goal tracking
+- **Onboarding Wizard** — 3-screen health intake that immediately populates your Health Twin for first-message personalization
+- **DynamoDB persistence** — Sessions and Health Twin survive Vercel cold starts, sync across devices
+- **Observable reasoning** — Expandable panel shows dispatcher route, per-agent timing, validator status, pipeline trace timeline, and token estimates
+- **42 unit tests** — Vitest coverage for dispatcher, validator, prompt guard, Health Twin, and JSON utilities
 
 ## How we built it
 
-- **AI**: Amazon Nova 2 Lite (text + multimodal vision + tool calling) and Amazon Nova 2 Sonic (voice STT/TTS) via AWS Bedrock
-- **Frontend**: Next.js 16 with TypeScript, Tailwind CSS, and shadcn/ui — custom liquid glass UI design
-- **Mobile**: Android APK via Capacitor 8.x, with native phone sensors (pedometer, heart rate, accelerometer)
-- **Streaming**: Server-Sent Events for real-time agent pipeline visibility
-- **Auth**: NextAuth v5 with Google OAuth + email/password
-- **Deploy**: Vercel (serverless) with automatic scaling
-- **Nutrition**: USDA FoodData Central API for food lookups
+- **AI**: Amazon Nova 2 Lite (text + multimodal vision + tool calling) and Amazon Nova 2 Sonic (voice) via AWS Bedrock
+- **Backend**: Next.js 16 App Router with TypeScript, Vercel serverless functions
+- **Database**: AWS DynamoDB for session persistence + Health Twin storage + user auth
+- **Frontend**: Tailwind CSS + shadcn/ui with custom liquid glass UI design system
+- **Mobile**: Android APK via Capacitor 8.x, with native phone sensors (pedometer, heart rate, accelerometer) and custom TTS plugin
+- **Streaming**: ConverseStreamCommand for real-time token streaming + Server-Sent Events for pipeline visibility
+- **Auth**: NextAuth v5 with Google OAuth + email/password + demo account for judges
+- **Testing**: Vitest with 42 unit tests covering core agent logic
+- **Deploy**: Vercel (serverless) with DynamoDB on-demand billing
 
-The agent pipeline is a true multi-agent system — not just prompt chaining. Each agent has a distinct role, distinct system prompt, and produces structured JSON output that feeds into the next. The Planner uses Nova's native `toolConfig` to decide when to call external tools. The system includes intelligent fallback — if Bedrock quota is exceeded, template-based responses seamlessly take over.
+The pipeline is a **true multi-agent system** — not prompt chaining:
+- **Dynamic routing** — Dispatcher classifies intent and skips unnecessary agents (5x faster for greetings)
+- **Inter-agent verification** — Validator checks Planner output against Health Twin, triggers re-planning on conflicts
+- **Native tool calling** — Planner uses Bedrock's `toolConfig` to decide when and which tools to invoke
+- **Predictive coaching** — Monitor proactively references detected patterns from Health Twin
+- **Observable reasoning** — Full pipeline trace with per-agent timing and status visible to user
 
 ## Amazon Nova usage
 
-| Nova Model | Feature | How |
+| Nova Model | Feature | API |
 |---|---|---|
-| **Nova 2 Lite** (text) | 3-agent pipeline: analysis, planning, coaching | Bedrock Converse API with structured JSON output |
-| **Nova 2 Lite** (multimodal) | Meal photo analysis + product label OCR | Bedrock Converse API with base64 image input |
-| **Nova 2 Lite** (tool calling) | Dynamic data fetching in Planner agent | Bedrock Converse API with `toolConfig` — `get_health_data`, `get_nutrition_info`, `get_daily_progress` |
-| **Nova 2 Sonic** | Voice-to-voice coaching | Bedrock `InvokeModelWithBidirectionalStream` for STT + TTS |
+| **Nova 2 Lite** | Dispatcher — intent classification (~50 tokens) | Bedrock Converse API |
+| **Nova 2 Lite** | Analyzer — health assessment with energy scoring | Bedrock Converse API |
+| **Nova 2 Lite** | Planner — plan generation with 3 tool calls | Converse API with `toolConfig` |
+| **Nova 2 Lite** | Validator — deep plan verification against Health Twin | Bedrock Converse API |
+| **Nova 2 Lite** | Monitor — streaming conversational response | `ConverseStreamCommand` |
+| **Nova 2 Lite** (multimodal) | Meal photo analysis + product label OCR | Converse API with image input |
+| **Nova 2 Sonic** | Premium voice streaming (bidirectional audio) | `InvokeModelWithBidirectionalStream` |
 
-**What makes it agentic:**
-- Three specialized agents with distinct roles and reasoning
-- Nova native tool calling (not external function execution — the model decides when and which tools to use)
-- Agent memory with adaptation notes — behavior evolves based on past interactions
-- Health Twin — persistent user profile built from extracted facts across sessions
-- Observable reasoning — users can inspect each agent's decision process
-- Graceful degradation — fallback engine activates seamlessly when the AI service is unavailable
+**7 distinct Nova API integration points** across 2 models — text reasoning, multimodal vision, native tool calling, token streaming, and voice.
 
 ## Challenges we ran into
 
-- **Agent memory consistency** — The analyzer would sometimes override user-stated values ("I slept 5 hours") with sensor data (7h from mock). Fixed by reordering prompts: conversation history comes first, sensor data second, with explicit "user-stated values override sensors" instructions.
-- **Energy score drift** — Follow-up messages about dinner would randomly change the energy score from 35 to 65. Fixed by persisting previous scores in adaptation notes.
-- **Nova 2 Sonic integration** — Getting bidirectional audio streaming working required careful WebSocket-to-HTTP bridge design for the serverless environment.
-- **Mobile WebView quirks** — Capacitor WebView had numerous issues: `crypto.randomUUID()` failing without secure context, pseudo-elements blocking touch events, flexbox scroll chains needing `min-h-0` on every container.
+- **Inter-agent consistency** — The Analyzer would override user-stated values ("I slept 5 hours") with sensor data. Fixed by implementing `extractUserStatedValues()` that persists user statements across the conversation.
+- **Validator verification loop** — Building a self-correcting pipeline where the Validator can reject and force re-planning required careful state management to avoid infinite loops (max 1 re-plan attempt).
+- **Token streaming + JSON parsing** — Monitor streams response tokens in real-time, but also needs to output structured JSON (tone, adaptation notes, profile updates). Solved by collecting the full stream, then parsing adaptation data post-stream.
+- **Voice-text continuity** — Ensuring voice conversations share full history with text chat required a shared session memory layer that both `/api/agent` and `/api/voice-chat` write to.
+- **Mobile WebView quirks** — Capacitor WebView: `speechSynthesis` unavailable (custom native TTS plugin), `crypto.randomUUID()` fails without secure context (custom fallback), flexbox scroll chains need `min-h-0` on every container.
 
 ## Accomplishments that we're proud of
 
-- **True multi-agent system** — not just a prompt chain, but specialized agents that produce structured data for the next agent, with tool calling and memory
-- **Health Twin** — the AI learns your allergies, food preferences, exercise habits, health conditions, and behavioral patterns, building a persistent profile that grows smarter
-- **Full Nova coverage** — text, vision, tool calling, and voice, all in one coherent product
-- **Observable AI** — expandable reasoning panels showing exactly how each agent thinks
-- **Seamless fallback** — users never see an error, even when API quotas are exceeded
+- **Self-correcting agent pipeline** — Validator catches allergy conflicts and forces Planner to regenerate. Not just error handling — genuine inter-agent communication.
+- **Health Twin** — Persistent profile that extracts conditions, allergies, food preferences, exercise habits, behavioral patterns, and lifestyle facts. Syncs server↔client via DynamoDB.
+- **Full Nova feature coverage** — 7 integration points: text, vision, tool calling, streaming, voice — all in one coherent product.
+- **Observable AI** — Pipeline trace timeline shows exactly which agents ran, how long each took, whether the Validator approved or rejected, and total token estimates.
+- **Predictive coaching** — Monitor proactively references Health Twin patterns: "I notice you tend to sleep poorly on work nights — let's prepare for that."
+- **Dynamic routing** — Dispatcher makes greetings 5x faster by skipping unnecessary agents. True agentic behavior, not rigid pipeline.
 
 ## What we learned
 
-Building a multi-agent system is fundamentally different from single-prompt engineering. Prompt ordering matters enormously — putting conversation history before sensor data completely changed how the Analyzer weighted information. We also learned that agent memory needs explicit consistency mechanisms (storing previous scores, extracting user-stated values) rather than relying on the model to "just remember."
+Multi-agent systems need **verification mechanisms**, not just sequential execution. Adding the Validator agent that checks Planner output against the Health Twin profile eliminated an entire class of errors (recommending allergenic foods, suggesting running to someone who hates it). We also learned that **observable reasoning** dramatically increases user trust — when people can see *why* the AI recommended something, they follow through more.
 
 ## What's next for NovaFit
 
-- **DynamoDB persistence** — moving from in-memory session storage to cloud-persistent data
-- **Wearable integration** — connecting to real smartwatch APIs (Wear OS, Samsung Health)
-- **Group coaching** — family/team wellness plans with shared goals
-- **Longitudinal insights** — weekly/monthly health trend analysis from accumulated Health Twin data
+- **Wearable integration** — Real smartwatch APIs (Wear OS, Samsung Health) replacing phone sensors
+- **Group coaching** — Family/team wellness plans with shared goals
+- **Longitudinal insights** — Weekly/monthly health trend analysis from accumulated Health Twin data
+- **Specialist agents** — Sleep specialist, nutrition specialist, and exercise specialist agents for deeper domain expertise
 
 ## Built With
 
-`amazon-nova` `aws-bedrock` `nextjs` `typescript` `tailwind-css` `capacitor` `android` `vercel` `next-auth` `shadcn-ui`
+`amazon-nova` `amazon-nova-2-lite` `amazon-nova-2-sonic` `aws-bedrock` `aws-dynamodb` `nextjs` `typescript` `tailwind-css` `capacitor` `android` `vercel` `next-auth` `shadcn-ui` `vitest`
 
 ## Try it out
 
 - **Live demo**: https://novafit-rho.vercel.app
+  - Demo login: `demo@novafit.ai` / `demo1234` (pre-populated Health Twin)
 - **Source code**: https://github.com/kosiorkosa47/NovaFit
-- **Video demo**: [link to YouTube/Loom]
+- **Video demo**: [link to YouTube video with #AmazonNova]
 
 #AmazonNova

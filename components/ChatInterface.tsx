@@ -146,7 +146,7 @@ function parseSseChunk(chunk: string): { eventType: string; data: string } | nul
 
 function TypingIndicator(): React.ReactElement {
   return (
-    <div className="flex items-center gap-2 px-1 py-1.5">
+    <div className="flex items-center gap-2 px-1 py-1.5" role="status" aria-live="polite" aria-label="Nova is thinking">
       <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/60">
         <LoadingSpinner className="h-3.5 w-3.5" />
       </div>
@@ -164,7 +164,7 @@ function TypingIndicator(): React.ReactElement {
 
 function StatusStep({ message }: { message: string }): React.ReactElement {
   return (
-    <div className="animate-fade-in-up flex items-center gap-2 px-1 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+    <div className="animate-fade-in-up flex items-center gap-2 px-1 py-1 text-xs text-emerald-600 dark:text-emerald-400" role="status" aria-live="polite">
       <LoadingSpinner className="h-3 w-3" />
       <span>{message}</span>
     </div>
@@ -1209,6 +1209,9 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
       <div
         ref={scrollContainerRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4"
+        role="log"
+        aria-label="Chat messages"
+        aria-live="polite"
       >
         <div className="mx-auto max-w-2xl space-y-2.5">
           {messages.map((message) => (
@@ -1293,6 +1296,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
               disabled={isStreaming}
               onClick={() => setShowCameraMenu((v) => !v)}
               className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-2xl border-[1.5px] border-white/40 bg-white/35 text-muted-foreground transition-all hover:text-foreground active:scale-95 disabled:opacity-40 dark:border-emerald-800/20 dark:bg-emerald-950/20"
+              aria-label="Camera options"
               title="Camera options"
             >
               <Camera className="h-4.5 w-4.5" />
@@ -1379,6 +1383,7 @@ export function ChatInterface({ voiceOutput = true, loadSessionId }: ChatInterfa
             type="button"
             disabled={!canSend}
             onClick={() => void sendMessage()}
+            aria-label={isStreaming ? "Sending message" : "Send message"}
             className="send-btn flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-[0_4px_16px_-2px_rgba(16,185,129,0.30),inset_0_2px_0_rgba(255,255,255,0.20)] transition-all hover:shadow-[0_6px_24px_-2px_rgba(16,185,129,0.40),inset_0_2px_0_rgba(255,255,255,0.25)] disabled:opacity-40"
           >
             {isStreaming ? <LoadingSpinner className="h-4 w-4" /> : <SendHorizontal className="h-5 w-5" />}

@@ -28,6 +28,11 @@ export const authConfig: NextAuthConfig = {
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
+        // Demo account — hardcoded for hackathon judges
+        if (parsed.data.email === "demo@novafit.ai" && parsed.data.password === "demo1234") {
+          return { id: "demo-user", name: "Demo User", email: "demo@novafit.ai", image: null };
+        }
+
         // Find user by email via GSI1
         const result = await dynamodb.query({
           TableName: AUTH_TABLE,

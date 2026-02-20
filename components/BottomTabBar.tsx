@@ -72,8 +72,8 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
   }, [updatePill]);
 
   return (
-    <nav className="tab-bar-glass relative z-10 shrink-0 border-t border-white/20 dark:border-emerald-800/15">
-      <div ref={containerRef} className="relative flex items-center justify-around py-1.5">
+    <nav className="tab-bar-glass relative z-10 shrink-0 border-t border-white/20 dark:border-emerald-800/15" aria-label="Main navigation">
+      <div ref={containerRef} className="relative flex items-center justify-around py-1.5" role="tablist">
         {/* Sliding pill — measured from actual button positions */}
         <div
           className="tab-pill pointer-events-none absolute inset-y-1 rounded-2xl transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
@@ -90,8 +90,10 @@ export function BottomTabBar({ activeTab, onTabChange }: BottomTabBarProps) {
               key={id}
               ref={(el) => { buttonRefs.current[i] = el; }}
               type="button"
+              role="tab"
               onClick={() => onTabChange(id)}
-              aria-current={active ? "page" : undefined}
+              aria-selected={active}
+              aria-label={t(labelKey, lang)}
               className={cn(
                 "relative z-10 flex flex-1 flex-col items-center gap-0.5 py-2.5 transition-all duration-300 ease-zen",
                 active
